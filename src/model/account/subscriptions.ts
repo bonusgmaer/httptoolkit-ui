@@ -21,43 +21,10 @@ export const SubscriptionPlans = {
 };
 
 async function loadPlanPrices() {
-    const response = await fetch(
-        `https://accounts.httptoolkit.tech/.netlify/functions/get-prices?product_ids=${
-            Object.values(SubscriptionPlans).map(plan => plan.id).join(',')
-        }`
-    );
-
-    if (!response.ok) {
-        console.log(response);
-        throw new Error(`Failed to look up prices, got ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    if (!data.success) {
-        console.log(data);
-        throw new Error("Price lookup request was unsuccessful");
-    }
-
-    const productPrices = data.response.products as Array<{
-        product_id: number,
-        currency: string,
-        price: { net: number },
-        subscription: { interval: string }
-    }>;
-
-    productPrices.forEach((productPrice) => {
-        const plan = _.find(SubscriptionPlans,
-            { id: productPrice.product_id }
-        ) as SubscriptionPlan | undefined;
-
-        if (!plan) return;
-
-        const currency = productPrice.currency;
-        const totalPrice = productPrice.price.net;
-        const monthlyPrice = productPrice.subscription.interval === 'year'
-            ? totalPrice / 12
-            : totalPrice;
+    Object.values(SubscriptionPlans).forEach((plan) => {
+        const currency = 'X';
+        const totalPrice = 0;
+        const monthlyPrice = 0;
 
         plan.prices = {
             currency: currency,
