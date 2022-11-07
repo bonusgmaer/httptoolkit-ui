@@ -22,7 +22,7 @@ export const SubscriptionPlans = {
 
 async function loadPlanPrices() {
     Object.values(SubscriptionPlans).forEach((plan) => {
-        const currency = 'X';
+        const currency = 'USD';
         const totalPrice = 0;
         const monthlyPrice = 0;
 
