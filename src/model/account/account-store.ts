@@ -66,6 +66,15 @@ export class AccountStore {
 
     private updateUser = flow(function * (this: AccountStore) {
         this.user = yield getLatestUserData();
+        this.user.subscription = {
+            id: 550382,
+            status: 'active',
+            plan: 'pro-annual',
+            expiry: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
+            updateBillingDetailsUrl: '#',
+            cancelSubscriptionUrl: '#',
+            lastReceiptUrl: '#'
+        }
         this.accountDataLastUpdated = Date.now();
 
         // Include the user email in error reports whilst they're logged in.
