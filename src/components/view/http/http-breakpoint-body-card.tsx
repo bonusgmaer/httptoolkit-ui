@@ -1,62 +1,55 @@
-import * as _ from 'lodash';
 import * as React from 'react';
 import { observable, action, reaction, computed } from 'mobx';
 import { observer, disposeOnUnmount } from 'mobx-react';
 import * as portals from 'react-reverse-portal';
 
-import { Headers } from '../../../types';
+import { RawHeaders } from '../../../types';
 import {
-    lastHeader,
     isProbablyUtf8,
     bufferToString,
     stringToBuffer
 } from '../../../util';
+import { getHeaderValue } from '../../../util/headers';
 import {
     EditableContentType,
     EditableContentTypes,
-    getEditableContentType,
-    getContentEditorName
+    getEditableContentType
 } from '../../../model/events/content-types';
-import { getReadableSize } from '../../../model/events/bodies';
 
-import { CollapsibleCard, CollapsibleCardHeading } from '../../common/card';
-import { CollapsingButtons } from '../../common/collapsing-buttons';
-import { Pill, PillSelector } from '../../common/pill';
-import { ExpandShrinkButton } from '../../common/expand-shrink-button';
-import { FormatButton } from '../../common/format-button';
-import { ThemedSelfSizedEditor } from '../../editor/base-editor';
-import { EditorCardContent } from './http-body-card';
+import { CollapsibleCard, ExpandableCardProps } from '../../common/card';
+import { SelfSizedEditor } from '../../editor/base-editor';
+import { EditableBodyCardHeader, EditorCardContent } from '../../editor/body-card-components';
 
 @observer
-export class HttpBreakpointBodyCard extends React.Component<{
+export class HttpBreakpointBodyCard extends React.Component<ExpandableCardProps & {
     title: string,
     direction: 'left' | 'right',
-    collapsed: boolean,
-    expanded: boolean,
-    onCollapseToggled: () => void,
-    onExpandToggled: () => void,
 
     exchangeId: string,
     body: Buffer,
-    headers: Headers,
+    rawHeaders: RawHeaders,
     onChange: (result: Buffer) => void,
-    editorNode: portals.HtmlPortalNode<typeof ThemedSelfSizedEditor>;
+    editorNode: portals.HtmlPortalNode<typeof SelfSizedEditor>;
 }> {
 
     @observable
     private contentType: EditableContentType = 'text';
 
     @action.bound
-    setContentType(value: string) {
+    onChangeContentType(value: string) {
         this.contentType = value as EditableContentType;
     }
 
     componentDidMount() {
         // If the content header is changed (manually, or when switching requests), update the
         // selected editor content type to match:
-        disposeOnUnmount(this, reaction(() => lastHeader(this.props.headers['content-type']), (contentTypeHeader) => {
-            this.contentType = getEditableContentType(contentTypeHeader) || 'text';
-        }, { fireImmediately: true }));
+        disposeOnUnmount(this, reaction(
+            () => getHeaderValue(this.props.rawHeaders, 'content-type'),
+            (contentTypeHeader) => {
+                this.contentType = getEditableContentType(contentTypeHeader) || 'text';
+            },
+            { fireImmediately: true }
+        ));
     }
 
     @computed
@@ -89,37 +82,28 @@ export class HttpBreakpointBodyCard extends React.Component<{
             expanded={expanded}
         >
             <header>
-                <CollapsingButtons>
-                    <ExpandShrinkButton
-                        expanded={expanded}
-                        onClick={onExpandToggled}
-                    />
-                    <FormatButton
-                        format={this.contentType}
-                        content={body}
-                        onFormatted={this.onBodyChange}
-                    />
-                </CollapsingButtons>
+                <EditableBodyCardHeader
+                    body={body}
+                    onBodyFormatted={this.onBodyChange}
 
-                <Pill>{ getReadableSize(body.byteLength) }</Pill>
-                <PillSelector<EditableContentType>
-                    onChange={this.setContentType}
-                    value={this.contentType}
-                    options={EditableContentTypes}
-                    nameFormatter={getContentEditorName}
+                    title={title}
+                    expanded={expanded}
+                    onExpandToggled={onExpandToggled}
+                    onCollapseToggled={onCollapseToggled}
+
+                    selectedContentType={this.contentType}
+                    contentTypeOptions={EditableContentTypes}
+                    onChangeContentType={this.onChangeContentType}
                 />
-                <CollapsibleCardHeading onCollapseToggled={onCollapseToggled}>
-                    { title }
-                </CollapsibleCardHeading>
             </header>
             <EditorCardContent>
-                <portals.OutPortal<typeof ThemedSelfSizedEditor>
+                <portals.OutPortal<typeof SelfSizedEditor>
                     contentId={`bp-${exchangeId}-${direction}`}
                     node={this.props.editorNode}
                     language={this.contentType}
                     value={bodyString}
                     onChange={this.onBodyChange}
-                    expanded={expanded}
+                    expanded={!!expanded}
                 />
             </EditorCardContent>
         </CollapsibleCard>;

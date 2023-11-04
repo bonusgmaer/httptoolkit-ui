@@ -21,7 +21,8 @@ import { Pill, PillSelector } from '../common/pill';
 import { IconButton } from '../common/icon-button';
 
 import { ContentViewer } from '../editor/content-viewer';
-import { ThemedSelfSizedEditor } from '../editor/base-editor';
+import { SelfSizedEditor } from '../editor/base-editor';
+import { EditorCardContent } from '../editor/body-card-components';
 
 const visualDirection = (message: StreamMessage) =>
     message.direction === 'sent'
@@ -143,7 +144,7 @@ const CollapsedStreamContent = styled(ContentMonoValue)`
 interface MessageEditorRowProps {
     streamId: string,
     message: StreamMessage,
-    editorNode: portals.HtmlPortalNode<typeof ThemedSelfSizedEditor>,
+    editorNode: portals.HtmlPortalNode<typeof SelfSizedEditor>,
     isPaidUser: boolean,
     onExportMessage: (message: StreamMessage) => void
 }
@@ -281,7 +282,7 @@ export class StreamMessageEditorRow extends React.Component<MessageEditorRowProp
                 />
                 <Pill>{ getReadableSize(message.content.byteLength) }</Pill>
             </EditorRowHeader>
-            <EditorCardContent>
+            <RowEditorContent>
                 <ContentViewer
                     contentId={`ws-${streamId}-${message.messageIndex}`}
                     editorNode={editorNode}
@@ -292,7 +293,7 @@ export class StreamMessageEditorRow extends React.Component<MessageEditorRowProp
                 >
                     {message.content}
                 </ContentViewer>
-            </EditorCardContent>
+            </RowEditorContent>
         </EditorRowContainer>;
     }
 
@@ -310,6 +311,7 @@ const EditorRowHeader = styled.div<{ messageDirection: 'left' | 'right' }>`
     display: flex;
     flex-direction: row;
     align-items: center;
+    gap: 8px;
 
     padding: 4px 15px 4px 0;
 
@@ -326,6 +328,8 @@ const EditorRowHeader = styled.div<{ messageDirection: 'left' | 'right' }>`
         flex-grow: 1;
         text-overflow: ellipsis;
         overflow: hidden;
+
+        margin-left: -8px;
     }
 
     > ${IconButton} {
@@ -339,20 +343,8 @@ const EditorRowHeader = styled.div<{ messageDirection: 'left' | 'right' }>`
     }
 `;
 
-export const EditorCardContent = styled.div`
-    background-color: ${p => p.theme.highlightBackground};
-    color: ${p => p.theme.highlightColor};
-
-    .monaco-editor-overlaymessage {
-        display: none;
-    }
-
-    position: relative;
-    flex-grow: 1;
-
-    /*
-    Allows shrinking smaller than content, to allow scrolling overflow e.g. for
-    scrollable URL param content
-    */
-    min-height: 0;
+const RowEditorContent = styled(EditorCardContent)`
+    /* Undo the whole-card specific bits of styling */
+    border-top: none;
+    margin: 0;
 `;

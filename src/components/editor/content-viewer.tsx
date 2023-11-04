@@ -5,16 +5,16 @@ import { observer } from 'mobx-react';
 import { SchemaObject } from 'openapi3-ts';
 import * as portals from 'react-reverse-portal';
 
-import { css, styled } from '../../styles';
+import { styled } from '../../styles';
 import { ObservablePromise, isObservablePromise } from '../../util/observable';
-import { asError } from '../../util/error';
+import { asError, unreachableCheck } from '../../util/error';
 import { stringToBuffer } from '../../util';
 
 import { ViewableContentType } from '../../model/events/content-types';
 import { Formatters, isEditorFormatter } from '../../model/events/body-formatting';
 
-import { ThemedSelfSizedEditor } from './base-editor';
-import { LoadingCardContent } from '../view/loading-card';
+import { ContainerSizedEditor, SelfSizedEditor } from './base-editor';
+import { LoadingCardContent } from '../common/loading-card';
 
 interface ContentViewerProps {
     children: Buffer | string;
@@ -22,7 +22,7 @@ interface ContentViewerProps {
     expanded: boolean;
     rawContentType?: string;
     contentType: ViewableContentType;
-    editorNode: portals.HtmlPortalNode<typeof ThemedSelfSizedEditor>;
+    editorNode: portals.HtmlPortalNode<typeof SelfSizedEditor | typeof ContainerSizedEditor>;
     cache: Map<Symbol, unknown>;
 
     // See BaseEditor.props.contentid
@@ -33,12 +33,35 @@ interface ContentViewerProps {
     onContentRendered?: () => void;
 }
 
-const ViewerContainer = styled.div<{ scrollable: boolean }>`
-    ${p => p.scrollable ?
-        css`
-            overflow-y: auto;
-            max-height: 100%;
-        ` : ''
+const ScrollableContentContainer = styled.div<{
+    expanded: boolean
+}>`
+    overflow-y: auto;
+    max-height: ${p => p.expanded
+        ? '100%'
+        : '560px' // Same as editor container
+    }
+`;
+
+const CenteredContentViewerContainer = styled.div<{
+    expanded: boolean
+}>`
+    display: flex;
+    justify-content: center;
+
+    ${p => p.expanded
+        ? `
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            align-items: stretch;
+        `
+        : `
+            height: 100%;
+            align-items: center;
+        `
     }
 `;
 
@@ -113,7 +136,7 @@ export class ContentViewer extends React.Component<ContentViewerProps> {
                 if (isObservablePromise<string>(content)) {
                     return <LoadingCardContent height='500px' />;
                 } else {
-                    return <portals.OutPortal<typeof ThemedSelfSizedEditor>
+                    return <portals.OutPortal<typeof SelfSizedEditor>
                         contentId={this.props.contentId}
                         node={this.props.editorNode}
                         options={this.editorOptions}
@@ -131,13 +154,23 @@ export class ContentViewer extends React.Component<ContentViewerProps> {
             }
         } else {
             const formatterConfig = this.formatter;
-            return <ViewerContainer scrollable={!!formatterConfig.scrollable}>
+
+
+            // Formatter components should all be either scrollable (top aligned, extending
+            // downwards, scrolling if there's no space) or centered (in the middle, scaling
+            // down to match if the container is ever smaller than the content size):
+            const FormatterContainer = formatterConfig.layout === 'scrollable'
+                    ? ScrollableContentContainer
+                : formatterConfig.layout === 'centered'
+                    ? CenteredContentViewerContainer
+                : unreachableCheck(formatterConfig.layout);
+
+            return <FormatterContainer expanded={this.props.expanded}>
                 <formatterConfig.Component
-                    expanded={this.props.expanded}
                     content={this.contentBuffer}
                     rawContentType={this.props.rawContentType}
                 />
-            </ViewerContainer>;
+            </FormatterContainer>;
         }
     }
 }

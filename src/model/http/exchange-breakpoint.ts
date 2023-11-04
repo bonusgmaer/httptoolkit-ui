@@ -12,9 +12,17 @@ import {
     BreakpointBody,
     MockttpBreakpointResponseResult,
 } from "../../types";
-import { asHeaderArray, stringToBuffer } from "../../util";
+import { logError } from "../../errors";
+
+import { stringToBuffer } from '../../util';
 import { getDeferred, Deferred } from "../../util/promise";
-import { reportError } from "../../errors";
+import {
+    asHeaderArray,
+    withHeaderValue,
+    getHeaderValue,
+    headersToRawHeaders,
+    rawHeadersToHeaders
+} from '../../util/headers';
 
 import {
     RAW_BODY_SUPPORTED,
@@ -30,7 +38,7 @@ function getBody(message: MockttpBreakpointedRequest | MockttpBreakpointedRespon
         message.body.buffer,
         asHeaderArray(message.headers['content-encoding'])
     ).catch((e) => {
-        reportError(e);
+        logError(e);
         const error = dedent`
             HTTP TOOLKIT ERROR: Could not decode body, \
             check content-encoding
@@ -54,7 +62,7 @@ export async function getRequestBreakpoint(request: MockttpBreakpointedRequest) 
         {
             method: request.method,
             url: request.url,
-            headers: headers,
+            rawHeaders: request.rawHeaders ?? headersToRawHeaders(request.headers)
         },
         decoded,
         encoded
@@ -66,7 +74,7 @@ export function getDummyResponseBreakpoint(httpVersion: 1 | 2) {
         {
             statusCode: 200,
             statusMessage: undefined,
-            headers: httpVersion === 2 ? { ':status': '200' } : {},
+            rawHeaders: httpVersion === 2 ? [[':status', '200']] : [],
         },
         stringToBuffer(''),
         stringToBuffer('')
@@ -86,7 +94,7 @@ export async function getResponseBreakpoint(response: MockttpBreakpointedRespons
         {
             statusCode: response.statusCode,
             statusMessage: statusMessage,
-            headers: response.headers
+            rawHeaders: response.rawHeaders ?? headersToRawHeaders(response.headers)
         },
         decoded,
         encoded
@@ -95,7 +103,7 @@ export async function getResponseBreakpoint(response: MockttpBreakpointedRespons
 
 type BreakpointInProgress = BreakpointRequestResult | BreakpointResponseResult;
 
-type BreakpointMetadata = Omit<BreakpointInProgress, 'body'>;
+type BreakpointMetadata = Omit<BreakpointInProgress, 'body' | 'rawBody'>;
 
 type BreakpointResumeType<T extends BreakpointInProgress> =
     T extends BreakpointRequestResult
@@ -121,7 +129,7 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
         this.editableBody = new EditableBody(
             decodedBody,
             encodedBody,
-            () => this.resultMetadata.headers['content-encoding']
+            () => getHeaderValue(this.resultMetadata.rawHeaders, 'Content-Encoding')
         );
 
         // Update the content-length when necessary, if it was previously correct
@@ -129,29 +137,32 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
             oldValue: previousEncodedLength,
             newValue: newEncodedLength
         }) => {
-            const { headers } = this.resultMetadata;
-            const previousContentLength = parseInt(headers['content-length'] || '', 10);
+            const { rawHeaders } = this.resultMetadata;
+            const previousContentLength = parseInt(getHeaderValue(rawHeaders, 'Content-Length') || '', 10);
 
             // If the content-length was previously correct, keep it correct:
             if (previousContentLength === previousEncodedLength) {
                 this.updateMetadata({
-                    headers: {
-                        ...headers,
-                        'content-length': newEncodedLength.toString()
-                    }
+                    rawHeaders: withHeaderValue(rawHeaders, {
+                        'Content-Length': newEncodedLength.toString()
+                    })
                 });
             }
         });
 
         // When content-length is first added, default to the correct value
-        let lastContentLength = this.resultMetadata.headers['content-length'];
-        reaction(() => this.resultMetadata.headers['content-length'], (newContentLength) => {
-            if (lastContentLength === undefined && newContentLength === "") {
-                const correctLength = this.editableBody.contentLength.toString()
-                this.inProgressResult.headers['content-length'] = correctLength;
+        let oldContentLength = getHeaderValue(this.resultMetadata.rawHeaders, 'Content-Length');
+        reaction(() => getHeaderValue(this.resultMetadata.rawHeaders, 'Content-Length'), (newContentLength) => {
+            if (oldContentLength === undefined && newContentLength === "") {
+                const { rawHeaders } = this.resultMetadata;
+                this.updateMetadata({
+                    rawHeaders: withHeaderValue(rawHeaders, {
+                        'Content-Length': this.editableBody.contentLength.toString()
+                    })
+                });
             }
 
-            lastContentLength = newContentLength;
+            oldContentLength = newContentLength;
         });
     }
 
@@ -168,7 +179,7 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
     updateMetadata(update: Partial<BreakpointMetadata>) {
         this.resultMetadata = {
             ...this.resultMetadata,
-            ..._.omit(update, 'body')
+            ..._.omit(update, 'body', 'rawBody')
         };
     }
 
@@ -194,7 +205,7 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
 
             // Psuedo-headers those will be generated automatically from the other,
             // fields, as part of the rest of the request process.
-            headers: omitPsuedoHeaders(this.resultMetadata.headers)
+            headers: omitPsuedoHeaders(rawHeadersToHeaders(this.resultMetadata.rawHeaders))
         } as unknown as BreakpointResumeType<T>);
     }
 

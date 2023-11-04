@@ -7,7 +7,7 @@ import { Icon } from '../../../icons';
 
 import { aOrAn, uppercaseFirst } from '../../../util/text';
 
-import { UiStore } from '../../../model/ui-store';
+import { UiStore } from '../../../model/ui/ui-store';
 import { getSummaryColour } from '../../../model/events/categorization';
 import { getMethodDocs } from '../../../model/http/http-docs';
 import { nameHandlerClass } from '../../../model/rules/rule-descriptions';
@@ -133,7 +133,7 @@ const RawRequestDetails = (p: { request: HtkRequest }) => {
         </CollapsibleSection>
 
         <ContentLabelBlock>Headers</ContentLabelBlock>
-        <HeaderDetails headers={p.request.headers} requestUrl={p.request.parsedUrl} />
+        <HeaderDetails headers={p.request.rawHeaders} requestUrl={p.request.parsedUrl} />
     </div>;
 }
 

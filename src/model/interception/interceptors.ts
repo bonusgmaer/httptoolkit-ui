@@ -4,7 +4,6 @@ import { ServerInterceptor } from "../../services/server-api";
 import {
     versionSatisfies,
     DETAILED_CONFIG_RANGE,
-    DOCKER_INTERCEPTION_RANGE,
     WEBRTC_GLOBALLY_ENABLED
 } from "../../services/service-versions";
 import { IconProps, SourceIcons } from "../../icons";
@@ -19,6 +18,7 @@ import { AndroidAdbCustomUi } from "../../components/intercept/config/android-ad
 import { ExistingBrowserCustomUi } from "../../components/intercept/config/existing-browser-config";
 import { JvmCustomUi } from "../../components/intercept/config/jvm-config";
 import { DockerAttachCustomUi } from "../../components/intercept/config/docker-attach-config";
+import { ManualIOSCustomUi } from "../../components/intercept/config/manual-ios-config";
 
 interface InterceptorConfig {
     name: string;
@@ -99,21 +99,21 @@ const INTERCEPT_OPTIONS: _.Dictionary<InterceptorConfig> = {
         getActivationOptions: getChromiumOptions
     },
     'fresh-chrome-beta': {
-        name: 'Chrome (beta)',
+        name: 'Chrome (Beta)',
         description: ["Intercept a fresh independent Chrome window"],
         iconProps: recoloured(SourceIcons.Chrome, '#DB4437'),
         tags: BROWSER_TAGS,
         getActivationOptions: getChromiumOptions
     },
     'fresh-chrome-dev': {
-        name: 'Chrome (dev)',
+        name: 'Chrome (Dev)',
         description: ["Intercept a fresh independent Chrome window"],
         iconProps: recoloured(SourceIcons.Chrome, '#74929f'),
         tags: BROWSER_TAGS,
         getActivationOptions: getChromiumOptions
     },
     'fresh-chrome-canary': {
-        name: 'Chrome (canary)',
+        name: 'Chrome (Canary)',
         description: ["Intercept a fresh independent Chrome window"],
         iconProps: recoloured(SourceIcons.Chrome, '#e8ab01'),
         tags: BROWSER_TAGS,
@@ -127,7 +127,7 @@ const INTERCEPT_OPTIONS: _.Dictionary<InterceptorConfig> = {
         getActivationOptions: getChromiumOptions
     },
     'fresh-chromium-dev': {
-        name: 'Chromium (dev)',
+        name: 'Chromium (Dev)',
         description: ["Intercept a fresh independent Chromium window"],
         iconProps: recoloured(SourceIcons.Chromium, '#74929f'),
         tags: BROWSER_TAGS,
@@ -175,21 +175,21 @@ const INTERCEPT_OPTIONS: _.Dictionary<InterceptorConfig> = {
         getActivationOptions: getChromiumOptions
     },
     'fresh-edge-beta': {
-        name: 'Edge (beta)',
+        name: 'Edge (Beta)',
         description: ["Intercept a fresh independent Edge window"],
         iconProps: recoloured(SourceIcons.Edge, '#50e6ff'),
         tags: BROWSER_TAGS,
         getActivationOptions: getChromiumOptions
     },
     'fresh-edge-dev': {
-        name: 'Edge (dev)',
+        name: 'Edge (Dev)',
         description: ["Intercept a fresh independent Edge window"],
         iconProps: recoloured(SourceIcons.Edge, '#74929f'),
         tags: BROWSER_TAGS,
         getActivationOptions: getChromiumOptions
     },
     'fresh-edge-canary': {
-        name: 'Edge (canary)',
+        name: 'Edge (Canary)',
         description: ["Intercept a fresh independent Edge window"],
         iconProps: recoloured(SourceIcons.Edge, '#ffc225'),
         tags: BROWSER_TAGS,
@@ -228,7 +228,7 @@ const INTERCEPT_OPTIONS: _.Dictionary<InterceptorConfig> = {
         tags: TERMINAL_TAGS
     },
     'android-adb': {
-        name: 'Android device via ADB',
+        name: 'Android Device via ADB',
         description: [
             'Intercept an Android device or emulator connected to ADB',
             'Automatically injects system HTTPS certificates into rooted devices & most emulators'
@@ -242,7 +242,7 @@ const INTERCEPT_OPTIONS: _.Dictionary<InterceptorConfig> = {
         tags: [...MOBILE_TAGS, ...ANDROID_TAGS, 'emulator', 'root', 'adb']
     },
     'android-device': {
-        name: 'Android device via QR code',
+        name: 'Android Device via QR code',
         description: [
             'Intercept any Android device on your network',
             'Manual setup required for HTTPS in some apps'
@@ -255,20 +255,28 @@ const INTERCEPT_OPTIONS: _.Dictionary<InterceptorConfig> = {
         uiConfig: AndroidDeviceCustomUi,
         tags: [...MOBILE_TAGS, ...ANDROID_TAGS]
     },
+    'manual-ios-device': {
+        name: 'iOS via Manual Setup',
+        description: ["Manually intercept all HTTP and HTTPS traffic from any iPhone or iPad"],
+        iconProps: SourceIcons.iOS,
+        clientOnly: true,
+        uiConfig: ManualIOSCustomUi,
+        tags: [...MOBILE_TAGS, ...IOS_TAGS]
+    },
     'ios-device': {
-        name: 'An iOS device',
+        name: 'Automatic iOS Device Setup',
         description: ["Intercept all HTTP traffic from an iOS device on your network"],
         iconProps: SourceIcons.iOS,
         tags: [...MOBILE_TAGS, ...IOS_TAGS]
     },
     'network-device': {
-        name: 'A device on your network',
+        name: 'A Device on Your Network',
         description: ["Intercept all HTTP traffic from another device on your network"],
         iconProps: SourceIcons.Network,
         tags: [...MOBILE_TAGS, ...IOS_TAGS, ...ANDROID_TAGS, 'lan', 'arp', 'wifi']
     },
     'virtualbox-machine': {
-        name: 'A virtualbox VM',
+        name: 'A Virtualbox VM',
         description: ["Intercept all traffic from a Virtualbox VM"],
         iconProps: SourceIcons.Desktop,
         tags: ['virtual machine', 'vagrant']
@@ -284,10 +292,6 @@ const INTERCEPT_OPTIONS: _.Dictionary<InterceptorConfig> = {
         description: ["Launch an Electron application with all its traffic intercepted"],
         iconProps: SourceIcons.Electron,
         uiConfig: ElectronCustomUi,
-        checkRequirements: ({ interceptorVersion }) => {
-            return !navigator.platform.startsWith('Mac') &&
-                versionSatisfies(interceptorVersion, "^1.0.1")
-        },
         tags: ['electron', 'desktop', 'postman']
     },
     [MANUAL_INTERCEPT_ID]: {

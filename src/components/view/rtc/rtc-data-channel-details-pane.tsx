@@ -12,8 +12,8 @@ import * as portals from 'react-reverse-portal';
 import { AccountStore } from '../../../model/account/account-store';
 import { RTCDataChannel } from '../../../model/webrtc/rtc-data-channel';
 
-import { ExpandedPaneContentContainer } from '../view-details-pane';
-import { ThemedSelfSizedEditor } from '../../editor/base-editor';
+import { PaneOuterContainer } from '../view-details-pane';
+import { SelfSizedEditor } from '../../editor/base-editor';
 import { RTCDataChannelCard } from './rtc-data-channel-card';
 import { RTCConnectionHeader } from './rtc-connection-header';
 
@@ -22,7 +22,7 @@ import { RTCConnectionHeader } from './rtc-connection-header';
 export class RTCDataChannelDetailsPane extends React.Component<{
     dataChannel: RTCDataChannel,
 
-    streamMessageEditor: portals.HtmlPortalNode<typeof ThemedSelfSizedEditor>,
+    streamMessageEditor: portals.HtmlPortalNode<typeof SelfSizedEditor>,
     navigate: (path: string) => void,
 
     // Injected:
@@ -49,7 +49,7 @@ export class RTCDataChannelDetailsPane extends React.Component<{
             accountStore
         } = this.props;
 
-        return <ExpandedPaneContentContainer>
+        return <PaneOuterContainer>
             { !this.isConnectionHidden &&
                 <RTCConnectionHeader
                     connection={dataChannel.rtcConnection}
@@ -67,7 +67,7 @@ export class RTCDataChannelDetailsPane extends React.Component<{
                 onExpandToggled={this.jumpToConnection}
                 onCollapseToggled={undefined} // Hide the collapse button
             />
-        </ExpandedPaneContentContainer>;
+        </PaneOuterContainer>;
 
     }
 

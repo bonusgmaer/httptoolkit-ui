@@ -7,7 +7,7 @@ import * as dateFns from 'date-fns';
 import { styled } from '../../styles';
 import { WithInjected } from '../../types';
 import { Icon } from '../../icons';
-import { reportError } from '../../errors';
+import { logError } from '../../errors';
 import { uploadFile, saveFile } from '../../util/ui';
 
 import { RulesStore } from '../../model/rules/rules-store';
@@ -22,7 +22,7 @@ import {
     ItemPath,
     mapRules
 } from '../../model/rules/rules-structure';
-import { serializeRules } from '../../model/rules/rule-serialization';
+import { SERIALIZED_RULES_MIME_TYPE, serializeRules } from '../../model/rules/rule-serialization';
 
 import { clickOnEnter } from '../component-utils';
 import { Button, SecondaryButton } from '../common/inputs';
@@ -278,6 +278,9 @@ class MockPage extends React.Component<MockPageProps> {
 
     @action.bound
     resetToDefaults() {
+        const confirmResult = confirm("Reset all rules?");
+        if (!confirmResult) return;
+
         this.props.rulesStore.resetRulesToDefault();
         this.collapseAll();
     }
@@ -329,7 +332,7 @@ class MockPage extends React.Component<MockPageProps> {
                     JSON.parse(uploadedFile)
                 );
             } catch (e) {
-                reportError(e);
+                logError(e);
                 alert(`Rules could not be imported: ${e}`);
             }
         }
@@ -344,7 +347,7 @@ class MockPage extends React.Component<MockPageProps> {
             dateFns.format(Date.now(), 'YYYY-MM-DD_HH-mm')
         }.htkrules`;
 
-        saveFile(filename, 'application/htkrules+json;charset=utf-8', rulesetContent);
+        saveFile(filename, SERIALIZED_RULES_MIME_TYPE, rulesetContent);
     }
 }
 

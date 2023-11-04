@@ -1,14 +1,14 @@
 import * as _ from 'lodash';
 import * as React from 'react';
 import { observer, inject } from 'mobx-react';
-import { action } from 'mobx';
 
 import { styled } from '../../../styles';
 import { Icon } from '../../../icons';
-import { trackEvent } from '../../../metrics';
+import { logError } from '../../../errors';
 
 import { Interceptor } from '../../../model/interception/interceptors';
-import { UiStore } from '../../../model/ui-store';
+import { UiStore } from '../../../model/ui/ui-store';
+import { DesktopApi } from '../../../services/desktop-api';
 
 import { uploadFile } from '../../../util/ui';
 import { Button, SecondaryButton, UnstyledButton } from '../../common/inputs';
@@ -142,7 +142,9 @@ class ElectronConfig extends React.Component<{
     }
 
     selectApplication = async () => {
-        const pathToApplication = await uploadFile('path');
+        const appPicker = DesktopApi.selectApplication ?? (() => uploadFile('path'));
+
+        const pathToApplication = await(appPicker());
 
         if (!pathToApplication) {
             this.props.closeSelf();
@@ -163,8 +165,9 @@ class ElectronConfig extends React.Component<{
         activateInterceptor({ pathToApplication })
         .then(() => {
             reportSuccess();
-        }).catch(() => {
+        }).catch((e) => {
             this.props.uiStore!.forgetElectronPath(pathToApplication);
+            logError(e);
         });
     }
 
@@ -182,9 +185,9 @@ class ElectronConfig extends React.Component<{
             </p>
             {
                 platform === 'mac' && previousElectronAppPaths.length < 2 && <p>
-                    For .app bundles, enter either the bundle name (with or without .app)
-                    or the full path to the executable itself, typically stored in
-                    Contents/MacOS inside the bundle.
+                    For .app bundles, you can intercept either the bundle
+                    (the .app directory) or the executable itself,
+                    typically stored in Contents/MacOS inside the bundle.
                 </p>
             }
             <p>

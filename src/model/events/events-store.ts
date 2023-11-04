@@ -27,18 +27,18 @@ import {
     InputRTCMediaTrackOpened,
     InputRTCMediaStats,
     InputRTCMediaTrackClosed,
-    InputRTCExternalPeerAttached
+    InputRTCExternalPeerAttached,
+    TimingEvents
 } from '../../types';
 
 import { lazyObservablePromise } from '../../util/observable';
-import { reportError } from '../../errors';
+import { logError } from '../../errors';
 
 import { ProxyStore } from "../proxy-store";
 import { ApiStore } from '../api/api-store';
 import { RulesStore } from '../rules/rules-store';
 import { findItem, isRuleGroup } from '../rules/rules-structure';
 
-import { parseSource } from '../http/sources';
 import { parseHar } from '../http/har';
 
 import { FailedTlsConnection } from '../tls/failed-tls-connection';
@@ -109,7 +109,7 @@ type EventType =
     | MockttpEventType
     | MockRTCEventType;
 
-type QueuedEvent = ({
+export type QueuedEvent = ({
     [T in EventType]: { type: T, event: EventTypesMap[T] }
 }[EventType]);
 
@@ -210,9 +210,7 @@ export class EventsStore {
     @computed.struct
     get activeSources() {
         return _(this.exchanges)
-            .map(e => e.request.headers['user-agent'])
-            .uniq()
-            .map(parseSource)
+            .map(e => e.request.source)
             .uniqBy(s => s.summary)
             .value();
     }
@@ -285,7 +283,7 @@ export class EventsStore {
         } catch (e) {
             // It's possible we might fail to parse an input event. This shouldn't happen, but if it
             // does it's better to drop that one event and continue instead of breaking completely.
-            reportError(e);
+            logError(e);
         }
     }
 
@@ -621,13 +619,7 @@ export class EventsStore {
     }
 
     async loadFromHar(harContents: {}) {
-        const {
-            requests,
-            responses,
-            aborts,
-            tlsErrors,
-            pinnedIds
-        } = await parseHar(harContents).catch((harParseError: HarParseError) => {
+        const { events, pinnedIds } = await parseHar(harContents).catch((harParseError: HarParseError) => {
             // Log all suberrors, for easier reporting & debugging.
             // This does not include HAR data - only schema errors like
             // 'bodySize is missing' at 'entries[1].request'
@@ -641,17 +633,19 @@ export class EventsStore {
         // to the UI like any other seen request data. Arguably we could call addRequest &
         // setResponse etc directly, but this is nicer if the UI thread is already under strain.
 
-        // First, we put the request & TLS error events together in order:
-        this.eventQueue.push(..._.sortBy([
-            ...requests.map(r => ({ type: 'request' as const, event: r })),
-            ...tlsErrors.map(r => ({ type: 'tls-client-error' as const, event: r }))
-        ], e => e.event.timingEvents.startTime));
-
-        // Then we add responses & aborts. They just update requests, so order doesn't matter:
-        this.eventQueue.push(
-            ...responses.map(r => ({ type: 'response' as const, event: r })),
-            ...aborts.map(r => ({ type: 'abort' as const, event: r }))
+        // First, we run through the request & TLS error events together, in order, since these
+        // define the initial event ordering
+        const [initialEvents, updateEvents] = _.partition(events, ({ type }) =>
+            type === 'request' ||
+            type === 'websocket-request' ||
+            type === 'tls-client-error'
         );
+        this.eventQueue.push(..._.sortBy(initialEvents, (e) =>
+            (e.event as { timingEvents: TimingEvents }).timingEvents.startTime
+        ));
+
+        // Then we add everything else (responses & aborts). They just update, so order doesn't matter:
+        this.eventQueue.push(...updateEvents);
 
         this.queueEventFlush();
 
@@ -662,6 +656,16 @@ export class EventsStore {
                 this.events.find(e => e.id === id)!.pinned = true;
             })));
         }
+    }
+
+    @action
+    recordSentRequest(request: InputCompletedRequest): HttpExchange {
+        const exchange = new HttpExchange(this.apiStore, { ...request });
+        // ^ This mutates request to use it, so we have to shallow-clone to use it below too:
+        exchange.updateFromCompletedRequest(request, false);
+
+        this.events.push(exchange);
+        return exchange;
     }
 
 }

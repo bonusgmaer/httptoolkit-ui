@@ -2,13 +2,11 @@ import * as React from 'react';
 
 import { Icon } from "../../icons";
 import { styled } from '../../styles';
-import { reportError } from '../../errors';
 
 import { clickOnEnter } from '../component-utils';
 import { PillButton } from './pill';
 import { IconButton } from './icon-button';
-
-const clipboardSupported = !!navigator.clipboard;
+import { copyToClipboard } from '../../util/ui';
 
 const CopyIconButton = styled(IconButton)`
     color: ${p => p.theme.mainColor};
@@ -49,8 +47,6 @@ export const CopyButtonIcon = (p: {
     content: string,
     onClick: () => void
 }) => {
-    if (!clipboardSupported) return null;
-
     const [success, showSuccess] = useTemporaryFlag();
 
     return <CopyIconButton
@@ -67,13 +63,10 @@ export const CopyButtonIcon = (p: {
 }
 
 export const CopyButtonPill = (p: { content: string, children?: React.ReactNode }) => {
-    if (!clipboardSupported) return null;
-
     const [success, showSuccess] = useTemporaryFlag();
 
     return <PillButton
         tabIndex={0}
-        onKeyDown={clickOnEnter}
         onClick={() => {
             copyToClipboard(p.content);
             showSuccess();
@@ -85,13 +78,4 @@ export const CopyButtonPill = (p: { content: string, children?: React.ReactNode 
         />
         { p.children }
     </PillButton>;
-}
-
-async function copyToClipboard(content: string) {
-    try {
-        await navigator.clipboard!.writeText(content);
-    } catch (e) {
-        console.log('Failed to copy to the clipboard');
-        reportError(e);
-    }
 }

@@ -4,11 +4,11 @@ import { action, observable, reaction, autorun, observe, runInAction, computed }
 import { observer, disposeOnUnmount, inject } from 'mobx-react';
 import * as dedent from 'dedent';
 
-import { Headers } from '../../types';
+import { Headers, RawHeaders } from '../../types';
 import { css, styled } from '../../styles';
 import { WarningIcon } from '../../icons';
 import { uploadFile } from '../../util/ui';
-import { asError, isErrorLike, UnreachableCheck } from '../../util/error';
+import { asError, isErrorLike, unreachableCheck, UnreachableCheck } from '../../util/error';
 import {
     byteLength,
     asBuffer,
@@ -16,6 +16,13 @@ import {
     stringToBuffer,
     bufferToString
 } from '../../util';
+import {
+    getHeaderValue,
+    headersToRawHeaders,
+    rawHeadersToHeaders,
+    HEADER_NAME_REGEX,
+    setHeaderValue
+} from '../../util/headers';
 
 import {
     Handler,
@@ -43,7 +50,8 @@ import {
     WebSocketPassThroughHandler,
     EchoWebSocketHandlerDefinition,
     RejectWebSocketHandlerDefinition,
-    ListenWebSocketHandlerDefinition
+    ListenWebSocketHandlerDefinition,
+    WebSocketForwardToHostHandler
 } from '../../model/rules/definitions/websocket-rule-definitions';
 import {
     EthereumCallResultHandler,
@@ -74,7 +82,7 @@ import {
     SendStepDefinition
 } from '../../model/rules/definitions/rtc-rule-definitions';
 
-import { getStatusMessage, HEADER_NAME_REGEX } from '../../model/http/http-docs';
+import { getStatusMessage } from '../../model/http/http-docs';
 import { MethodName, MethodNames } from '../../model/http/methods';
 import { NATIVE_ETH_TYPES } from '../../model/rules/definitions/ethereum-abi';
 import {
@@ -84,9 +92,9 @@ import {
 } from '../../model/events/content-types';
 import { RulesStore } from '../../model/rules/rules-store';
 
-import { ThemedSelfSizedEditor } from '../editor/base-editor';
+import { SelfSizedEditor } from '../editor/base-editor';
 import { TextInput, Select, Button } from '../common/inputs';
-import { EditableHeaders } from '../common/editable-headers';
+import { EditableHeaders, EditableRawHeaders } from '../common/editable-headers';
 import { EditableStatus } from '../common/editable-status';
 import { FormatButton } from '../common/format-button';
 import { EditablePairs, PairsArray } from '../common/editable-pairs';
@@ -144,7 +152,11 @@ export function HandlerConfiguration(props: {
         case 'file':
             return <FromFileResponseHandlerConfig {...configProps} />;
         case 'forward-to-host':
-            return <ForwardToHostHandlerConfig {...configProps} />;
+        case 'ws-forward-to-host':
+            return <ForwardToHostHandlerConfig
+                {...configProps}
+                handlerKey={handlerKey}
+            />;
         case 'passthrough':
         case 'ws-passthrough':
             return <PassThroughHandlerConfig {...configProps} />;
@@ -272,16 +284,6 @@ const BodyContainer = styled.div`
     }
 `;
 
-function getHeaderValue(headers: Headers, headerName: string): string | undefined {
-    const headerValue = headers[headerName];
-
-    if (_.isArray(headerValue)) {
-        return headerValue[0];
-    } else {
-        return headerValue;
-    }
-}
-
 @observer
 class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | RejectWebSocketHandlerDefinition> {
 
@@ -293,8 +295,20 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
     @observable
     statusMessage = this.props.handler.statusMessage;
 
+    // We have to model raw header data here (even though handlers use header objects) because want to mutate
+    // the headers (e.g. appending content-type) without losing object-unrepresentable (e.g. dupe key order) UI state.
     @observable
-    headers = this.props.handler.headers || {};
+    rawHeaders = headersToRawHeaders(this.props.handler.headers || {});
+
+    @computed
+    get headers(): Headers {
+        return rawHeadersToHeaders(this.rawHeaders);
+    }
+    set headers(headers: Headers | undefined) {
+        if (_.isEqual(headers, this.headers)) return;
+        if (headers === undefined && Object.keys(this.headers).length === 0) return;
+        this.rawHeaders = headersToRawHeaders(headers || {});
+    }
 
     @observable
     contentType: EditableContentType = 'text';
@@ -307,27 +321,41 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
 
     componentDidMount() {
         // If any of our data fields change, rebuild & update the handler
-        disposeOnUnmount(this, reaction(() => (
-            JSON.stringify(_.pick(this, ['statusCode', 'statusMessage', 'headers', 'body']))
-        ), () => this.updateHandler()));
+        disposeOnUnmount(this, reaction(() => {
+            return JSON.stringify(_.pick(this, ['statusCode', 'statusMessage', 'headers', 'body']));
+        }, () => this.updateHandler()));
 
         // If the handler changes (or when its set initially), update our data fields
         disposeOnUnmount(this, autorun(() => {
-            const { status, statusMessage, headers, data } = this.props.handler instanceof StaticResponseHandler
+            const { status, statusMessage } = this.props.handler instanceof StaticResponseHandler
                 ? this.props.handler
-                : { ...this.props.handler, status: this.props.handler.statusCode, data: this.props.handler.body };
+                : { ...this.props.handler, status: this.props.handler.statusCode };
 
             runInAction(() => {
                 this.statusCode = status;
                 this.statusMessage = statusMessage;
-                this.headers = headers || {};
-                this.body = asBuffer(data);
+            });
+        }));
+        disposeOnUnmount(this, autorun(() => {
+            const { data } = this.props.handler instanceof StaticResponseHandler
+                ? this.props.handler
+                : { data: this.props.handler.body };
+
+            runInAction(() => {
+                this.body = asBuffer(data); // Usually returns data directly, since we set it as a buffer anyway
+            });
+        }));
+        disposeOnUnmount(this, autorun(() => {
+            const { headers } = this.props.handler;
+
+            runInAction(() => {
+                this.headers = headers;
             });
         }));
 
         // If you enter a relevant content-type header, consider updating the editor content type:
         disposeOnUnmount(this, autorun(() => {
-            const detectedContentType = getEditableContentType(getHeaderValue(this.headers, 'content-type'));
+            const detectedContentType = getEditableContentType(getHeaderValue(this.rawHeaders, 'content-type'));
             if (detectedContentType) runInAction(() => {
                 this.contentType = detectedContentType;
             });
@@ -339,12 +367,13 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
             oldValue: previousContentType,
             newValue: newContentType
         }) => {
-            const contentTypeHeader = getHeaderValue(this.headers, 'content-type');
+            const contentTypeHeader = getHeaderValue(this.rawHeaders, 'content-type');
+            const expectedContentType = getDefaultMimeType(newContentType);
 
             if (!contentTypeHeader) {
                 // If you pick a body content type with no header set, we add one
                 runInAction(() => {
-                    this.headers['content-type'] = getDefaultMimeType(newContentType);
+                    this.rawHeaders.push(['content-type', expectedContentType]);
                 });
             } else {
                 const headerContentType = getEditableContentType(contentTypeHeader);
@@ -352,7 +381,7 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
                 // If the body type changes, and the old header matched the old type, update the header
                 if (previousContentType === headerContentType) {
                     runInAction(() => {
-                        this.headers['content-type'] = getDefaultMimeType(newContentType);
+                        setHeaderValue(this.rawHeaders, 'content-type', expectedContentType);
                     });
                 }
                 // If there is a header, but it didn't match the body, leave it as-is
@@ -364,14 +393,16 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
             oldValue: previousBody,
             newValue: newBody
         }) => {
-            const lengthHeader = getHeaderValue(this.headers, 'content-length');
+            const lengthHeader = getHeaderValue(this.rawHeaders, 'content-length');
 
             if (!lengthHeader) return;
 
             if (parseInt(lengthHeader || '', 10) === byteLength(previousBody)) {
                 runInAction(() => {
                     // If the content-length was previously correct, keep it correct:
-                    this.headers['content-length'] = byteLength(newBody).toString();
+                    runInAction(() => {
+                        setHeaderValue(this.rawHeaders, 'content-length', byteLength(newBody).toString());
+                    });
                 });
             }
         }));
@@ -387,7 +418,7 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
     }
 
     render() {
-        const { statusCode, statusMessage, headers, body } = this;
+        const { statusCode, statusMessage, rawHeaders, body } = this;
 
         const bodyAsString = body.toString(this.textEncoding);
 
@@ -401,8 +432,8 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
             />
 
             <SectionLabel>Headers</SectionLabel>
-            <EditableHeaders
-                headers={headers}
+            <EditableRawHeaders
+                headers={rawHeaders}
                 onChange={this.onHeadersChanged}
             />
 
@@ -423,7 +454,7 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
                 </ConfigSelect>
             </BodyHeader>
             <BodyContainer>
-                <ThemedSelfSizedEditor
+                <SelfSizedEditor
                     contentId={null}
                     language={this.contentType}
                     value={bodyAsString}
@@ -440,8 +471,8 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
     }
 
     @action.bound
-    onHeadersChanged(headers: Headers) {
-        this.headers = headers;
+    onHeadersChanged(rawHeaders: RawHeaders) {
+        this.rawHeaders = rawHeaders;
     }
 
     @action.bound
@@ -460,7 +491,8 @@ class StaticResponseHandlerConfig extends HandlerConfig<StaticResponseHandler | 
             !this.statusCode ||
             this.statusCode < 100 ||
             this.statusCode >= 1000 ||
-            _.some(Object.keys(this.headers), (key) => !key.match(HEADER_NAME_REGEX))
+            this.rawHeaders.some(([key]) => !key.match(HEADER_NAME_REGEX)) ||
+            this.rawHeaders.some(([_, value]) => !value)
         ) return this.props.onInvalidState();
 
         this.props.onChange(
@@ -513,7 +545,6 @@ class FromFileResponseHandlerConfig extends HandlerConfig<FromFileResponseHandle
     @observable
     statusMessage = this.props.handler.statusMessage;
 
-    // Headers, as an array of { key, value }, with multiple values flattened.
     @observable
     headers = this.props.handler.headers || {};
 
@@ -553,6 +584,8 @@ class FromFileResponseHandlerConfig extends HandlerConfig<FromFileResponseHandle
             <SectionLabel>Headers</SectionLabel>
             <EditableHeaders
                 headers={headers}
+                convertToRawHeaders={headersToRawHeaders}
+                convertFromRawHeaders={rawHeadersToHeaders}
                 onChange={this.onHeadersChanged}
             />
 
@@ -629,9 +662,14 @@ const UrlInput = styled(TextInput)`
 
 @inject('rulesStore')
 @observer
-class ForwardToHostHandlerConfig extends HandlerConfig<ForwardToHostHandler, {
-    rulesStore?: RulesStore
-}> {
+class ForwardToHostHandlerConfig extends HandlerConfig<
+    | ForwardToHostHandler
+    | WebSocketForwardToHostHandler,
+    {
+        rulesStore?: RulesStore,
+        handlerKey: 'forward-to-host' | 'ws-forward-to-host'
+    }
+> {
 
     @observable
     private error: Error | undefined;
@@ -654,8 +692,18 @@ class ForwardToHostHandlerConfig extends HandlerConfig<ForwardToHostHandler, {
     }
 
     render() {
-        const { targetHost, updateHostHeader, error, onTargetChange, onUpdateHeaderChange } = this;
+        const {
+            targetHost,
+            updateHostHeader,
+            error,
+            onTargetChange,
+            onUpdateHeaderChange
+        } = this;
         const { targetHost: savedTargetHost } = this.props.handler.forwarding!;
+
+        const messageType = this.props.handlerKey === 'ws-forward-to-host'
+            ? 'WebSocket'
+            : 'request';
 
         return <ConfigContainer>
             <SectionLabel>Replacement host</SectionLabel>
@@ -671,7 +719,7 @@ class ForwardToHostHandlerConfig extends HandlerConfig<ForwardToHostHandler, {
                 value={updateHostHeader.toString()}
                 onChange={onUpdateHeaderChange}
                 title={dedent`
-                    Most servers will not accept requests that arrive
+                    Most servers will not accept ${messageType}s that arrive
                     with the wrong host header, so it's typically useful
                     to automatically change it to match the new host
                 `}
@@ -681,7 +729,7 @@ class ForwardToHostHandlerConfig extends HandlerConfig<ForwardToHostHandler, {
             </ConfigSelect>
             { savedTargetHost &&
                 <ConfigExplanation>
-                    All matching requests will be forwarded to {savedTargetHost},
+                    All matching {messageType}s will be forwarded to {savedTargetHost},
                     keeping their existing path{
                         !savedTargetHost.includes('://') ? ', protocol,' : ''
                     } and query string.{
@@ -698,26 +746,47 @@ class ForwardToHostHandlerConfig extends HandlerConfig<ForwardToHostHandler, {
         try {
             if (!this.targetHost) throw new Error('A target host is required');
 
-            const protocolMatch = this.targetHost.match(/^\w+:\/\//);
-            if (protocolMatch) {
-                const pathWithoutProtocol = this.targetHost.slice(protocolMatch[0].length);
+            let urlWithoutProtocol: string;
 
-                if (pathWithoutProtocol.includes('/')) {
-                    throw new Error('The replacement host shouldn\'t include a path, since it won\'t be used');
+            const protocolMatch = this.targetHost.match(/^(\w+):\/\//);
+            if (protocolMatch) {
+                const validProtocols = this.props.handlerKey === 'ws-forward-to-host'
+                    ? ['ws', 'wss']
+                    : ['http', 'https'];
+
+                if (!validProtocols.includes(protocolMatch[1].toLowerCase())) {
+                    throw new Error(
+                        `The protocol must be either ${validProtocols[0]} or ${validProtocols[1]}`
+                    );
                 }
-                if (pathWithoutProtocol.includes('?')) {
-                    throw new Error('The replacement host shouldn\'t include a query string, since it won\'t be used');
-                }
+
+                urlWithoutProtocol = this.targetHost.slice(protocolMatch[0].length);
             } else {
-                if (this.targetHost.includes('/')) {
-                    throw new Error('The replacement host shouldn\'t include a path, since it won\'t be used');
-                }
-                if (this.targetHost.includes('?')) {
-                    throw new Error('The replacement host shouldn\'t include a query string, since it won\'t be used');
-                }
+                urlWithoutProtocol = this.targetHost;
             }
 
-            this.props.onChange(new ForwardToHostHandler(this.targetHost, this.updateHostHeader, this.props.rulesStore!));
+            if (urlWithoutProtocol.includes('/')) {
+                throw new Error(
+                    'The replacement host shouldn\'t include a path, since it won\'t be used'
+                );
+            }
+            if (urlWithoutProtocol.includes('?')) {
+                throw new Error(
+                    'The replacement host shouldn\'t include a query string, since it won\'t be used'
+                );
+            }
+
+            const HandlerClass = this.props.handlerKey === 'ws-forward-to-host'
+                ? WebSocketForwardToHostHandler
+                : ForwardToHostHandler;
+
+            this.props.onChange(
+                new HandlerClass(
+                    this.targetHost,
+                    this.updateHostHeader,
+                    this.props.rulesStore!
+                )
+            );
             this.error = undefined;
         } catch (e) {
             console.log(e);
@@ -953,11 +1022,17 @@ class HeadersTransformConfig<T extends RequestTransform | ResponseTransform> ext
         ) ?? 'none';
     }
 
+    @computed
+    get headers() {
+        if (this.selected === 'none') return {};
+        return this.props.transform[this.selected] || {};
+    }
+
     render() {
-        const { type, transform } = this.props;
+        const { type } = this.props;
         const {
             selected,
-            convertHeaderResult,
+            convertResultFromRawHeaders,
             onTransformTypeChange,
             setHeadersValue
         } = this;
@@ -974,14 +1049,34 @@ class HeadersTransformConfig<T extends RequestTransform | ResponseTransform> ext
             {
                 selected !== 'none' && <TransformDetails>
                     <EditableHeaders
-                        headers={transform[selected] || {}}
-                        convertResult={convertHeaderResult}
+                        headers={this.headers}
+                        convertToRawHeaders={headersToRawHeaders}
+                        convertFromRawHeaders={convertResultFromRawHeaders}
                         onChange={setHeadersValue}
                         allowEmptyValues={selected === 'updateHeaders'}
                     />
                 </TransformDetails>
             }
         </TransformConfig>;
+    }
+
+    convertResultFromRawHeaders = (headers: RawHeaders): Headers => {
+        if (this.selected === 'updateHeaders') {
+            return rawHeadersToHeaders(
+                headers.map(([key, value]) =>
+                    [key, value === '' ? undefined as any : value] // => undefined to explicitly remove headers
+            ));
+        } else {
+            return rawHeadersToHeaders(headers);
+        }
+    };
+
+    @action.bound
+    setHeadersValue(value: Headers) {
+        this.clearValues();
+        if (this.selected !== 'none') {
+            this.props.onChange(this.selected)(value);
+        }
     }
 
     @action.bound
@@ -997,22 +1092,6 @@ class HeadersTransformConfig<T extends RequestTransform | ResponseTransform> ext
         HeadersTransformConfig.FIELDS.forEach((field) =>
             this.props.onChange(field)(undefined)
         );
-    }
-
-    convertHeaderResult = (headers: Headers): Headers => {
-        if (this.selected === 'updateHeaders') {
-            return _.mapValues(headers, (header) => header === '' ? undefined : header) as Headers;
-        } else {
-            return headers;
-        }
-    };
-
-    @action.bound
-    setHeadersValue(value: Headers) {
-        this.clearValues();
-        if (this.selected !== 'none') {
-            this.props.onChange(this.selected)(value);
-        }
     }
 };
 
@@ -1161,7 +1240,7 @@ const RawBodyTransfomConfig = (props: {
             </ConfigSelect>
         </BodyHeader>
         <BodyContainer>
-            <ThemedSelfSizedEditor
+            <SelfSizedEditor
                 contentId={null}
                 language={contentType}
                 value={bufferToString(props.body)}
@@ -1207,7 +1286,7 @@ const JsonUpdateTransformConfig = (props: {
             />
         </BodyHeader>
         <BodyContainer>
-            <ThemedSelfSizedEditor
+            <SelfSizedEditor
                 contentId={null}
                 language='json'
                 value={bodyString}
@@ -1233,7 +1312,7 @@ class PassThroughHandlerConfig extends HandlerConfig<
                         ? 'WebSockets'
                     : this.props.ruleType === 'webrtc'
                         ? 'data and media'
-                    : (() => { throw new UnreachableCheck(this.props.ruleType); })()
+                    : unreachableCheck(this.props.ruleType)
                 } will be transparently passed through to the upstream {
                     this.props.ruleType === 'webrtc'
                         ? 'RTC peer, once one is connected'
@@ -1308,7 +1387,7 @@ class TimeoutHandlerConfig extends HandlerConfig<TimeoutHandler> {
                         ? 'WebSocket'
                     : this.props.ruleType === 'webrtc'
                         ? (() => { throw new Error('Not compatible with WebRTC rules') })
-                    : (() => { throw new UnreachableCheck(this.props.ruleType); })()
+                    : unreachableCheck(this.props.ruleType)
                 } is received, the server will keep the connection open but do nothing.
                 With no data or response, most clients will time out and abort the
                 request after sufficient time has passed.
@@ -1329,7 +1408,7 @@ class CloseConnectionHandlerConfig extends HandlerConfig<CloseConnectionHandler>
                         ? 'WebSocket'
                     : this.props.ruleType === 'webrtc'
                         ? (() => { throw new Error('Not compatible with WebRTC rules') })
-                    : (() => { throw new UnreachableCheck(this.props.ruleType); })()
+                    : unreachableCheck(this.props.ruleType)
                 } is received, the connection will be cleanly closed, with no response.
             </ConfigExplanation>
         </ConfigContainer>;
@@ -1348,7 +1427,7 @@ class ResetConnectionHandlerConfig extends HandlerConfig<ResetConnectionHandler>
                         ? 'WebSocket'
                     : this.props.ruleType === 'webrtc'
                         ? (() => { throw new Error('Not compatible with WebRTC rules') })
-                    : (() => { throw new UnreachableCheck(this.props.ruleType); })()
+                    : unreachableCheck(this.props.ruleType)
                 } is received, the connection will be killed with a TCP RST packet (or a
                 RST_STREAM frame, for HTTP/2 requests).
             </ConfigExplanation>
@@ -1654,7 +1733,7 @@ class JsonBasedHandlerConfig<H extends Handler> extends HandlerConfig<H, {
                 />
             </BodyHeader>
             <BodyContainer>
-                <ThemedSelfSizedEditor
+                <SelfSizedEditor
                     contentId={null}
                     language='json'
                     value={valueString}
@@ -1902,7 +1981,7 @@ class IpfsCatTextHandlerConfig extends HandlerConfig<IpfsCatTextHandler> {
                 </ConfigSelect>
             </BodyHeader>
             <BodyContainer>
-                <ThemedSelfSizedEditor
+                <SelfSizedEditor
                     contentId={null}
                     language={this.contentType}
                     value={bodyAsString}
@@ -2384,7 +2463,7 @@ class RTCSendMessageStepConfig extends HandlerConfig<SendStepDefinition> {
                 </ConfigSelect>
             </BodyHeader>
             <BodyContainer>
-                <ThemedSelfSizedEditor
+                <SelfSizedEditor
                     contentId={null}
                     language={this.contentType}
                     value={messageAsString}

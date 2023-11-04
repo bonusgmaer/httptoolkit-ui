@@ -19,16 +19,18 @@ import {
 import {
     fakeBuffer,
     FakeBuffer,
-    asHeaderArray,
-    lastHeader,
     stringToBuffer,
 } from '../../util';
 import { UnreachableCheck } from '../../util/error';
 import { lazyObservablePromise, ObservablePromise, observablePromise } from "../../util/observable";
+import {
+    asHeaderArray,
+    lastHeader
+} from '../../util/headers';
 
-import { reportError } from '../../errors';
+import { logError } from '../../errors';
 
-import { parseSource } from './sources';
+import { MANUALLY_SENT_SOURCE, parseSource } from './sources';
 import { getContentType } from '../events/content-types';
 import { HTKEventBase } from '../events/event-base';
 
@@ -80,7 +82,9 @@ function addRequestMetadata(request: InputRequest): HtkRequest {
     try {
         return Object.assign(request, {
             parsedUrl: tryParseUrl(request) || getFallbackUrl(request),
-            source: parseSource(request.headers['user-agent']),
+            source: request.tags.includes('httptoolkit:manually-sent-request')
+                ? MANUALLY_SENT_SOURCE
+                : parseSource(request.headers['user-agent']),
             body: new HttpBody(request, request.headers),
             contentType: getContentType(lastHeader(request.headers['content-type'])) || 'text',
             cache: observable.map(new Map<symbol, unknown>(), { deep: false })
@@ -145,7 +149,7 @@ export class HttpBody implements MessageBody {
             this._encoded = encoded;
             return decoded;
         } catch (e: any) {
-            reportError(e);
+            logError(e);
 
             // In most cases, we get the encoded data back regardless, so recapture it here:
             if (e.inputBuffer) {
@@ -215,11 +219,6 @@ export class HttpExchange extends HTKEventBase {
         this._apiMetadataPromise = apiStore.getApi(this.request);
     }
 
-    // Logic elsewhere can put values into these caches to cache calculations
-    // about this exchange weakly, so they GC with the exchange.
-    // Keyed by symbols only, so we know we never have conflicts.
-    public cache = observable.map(new Map<symbol, unknown>(), { deep: false });
-
     public readonly request: HtkRequest;
     public readonly id: string;
 
@@ -261,7 +260,7 @@ export class HttpExchange extends HTKEventBase {
     }
 
     @observable
-    public readonly timingEvents: TimingEvents | {};  // May be {} if using an old server (<0.1.7)
+    public readonly timingEvents: Partial<TimingEvents>; // May be {} if using an old server (<0.1.7)
 
     @observable.ref
     public response: HtkResponse | 'aborted' | undefined;
@@ -379,10 +378,12 @@ export class HttpExchange extends HTKEventBase {
                 } else if (apiMetadata.type === 'openrpc') {
                     return await parseRpcApiExchange(apiMetadata, this);
                 } else {
+                    console.log('Unknown API metadata type for host', this.request.parsedUrl.hostname);
+                    console.log(apiMetadata);
                     throw new UnreachableCheck(apiMetadata, m => m.type);
                 }
             } catch (e) {
-                reportError(e);
+                logError(e);
                 throw e;
             }
         } else {

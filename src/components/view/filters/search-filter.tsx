@@ -3,9 +3,10 @@ import * as React from 'react';
 import { disposeOnUnmount, inject, observer } from 'mobx-react';
 import { action, computed, observable } from 'mobx';
 import { trackUndo } from 'mobx-shallow-undo';
+import * as polished from 'polished';
 
 import { css, styled } from '../../../styles';
-import { isCmdCtrlPressed } from '../../../util/ui';
+import { copyToClipboard, isCmdCtrlPressed } from '../../../util/ui';
 
 import {
     Filter,
@@ -19,7 +20,7 @@ import {
     buildCustomFilter,
     CustomFilterClass
 } from '../../../model/filters/filter-matching';
-import { UiStore } from '../../../model/ui-store';
+import { UiStore } from '../../../model/ui/ui-store';
 import { AccountStore } from '../../../model/account/account-store';
 
 import { IconButton, IconButtonLink } from '../../common/icon-button';
@@ -49,7 +50,33 @@ const SearchFilterBox = styled.div<{ hasContents: boolean }>`
     font-size: ${p => p.theme.textSize};
 
     display: flex;
-    flex-wrap: wrap;
+
+    &:hover, &:focus-within {
+        flex-wrap: wrap;
+    }
+    &:not(:hover):not(:focus-within) {
+        overflow: hidden;
+    }
+
+    /* Add a layer to act as a button background over non-wrapping content */
+    &:after {
+        content: "";
+        position: absolute;
+        display: block;
+
+        z-index: 5;
+
+        top: 4px;
+        bottom: 4px;
+
+        right: 0px;
+        width: 36px;
+        background: linear-gradient(
+            to right,
+            transparent 0%,
+            ${p => polished.rgba(p.theme.highlightBackground, 0.9)} 25%
+        );
+    }
 
     .react-autosuggest__container {
         flex-grow: 1;
@@ -75,7 +102,10 @@ const FloatingSearchButtonStyles = css`
     top: 0;
     right: 0;
     bottom: 0;
-`
+
+    /* Appears in front of the :after background layer */
+    z-index: 10;
+`;
 
 const FloatingClearFiltersButton = styled(IconButton)`${FloatingSearchButtonStyles}`;
 const FloatingFilterDocsButtonLink = styled(IconButtonLink)`
@@ -390,16 +420,14 @@ export class SearchFilter<T> extends React.Component<{
             activeFilters.indexOf(f),
         ['desc']);
 
-        if (filtersToCopy.length > 0 && !!navigator.clipboard) {
+        if (filtersToCopy.length > 0) {
             const serialization = filtersToCopy.map(t => t.serialize()).join(' ');
-            navigator.clipboard.writeText(serialization);
+            copyToClipboard(serialization);
             e.preventDefault();
         }
     }
 
     private onCut = (e: React.ClipboardEvent) => {
-        if (!navigator.clipboard) return;
-
         this.onCopy(e);
         this.deleteSelectedFilters();
     }

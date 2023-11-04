@@ -2,8 +2,8 @@ import * as _ from 'lodash';
 import { computed, observable, action, runInAction, reaction } from 'mobx';
 
 import { BreakpointBody } from '../../types';
-import { reportError } from "../../errors";
-import { asHeaderArray } from "../../util";
+import { logError } from "../../errors";
+import { asHeaderArray } from "../../util/headers";
 import { observablePromise, ObservablePromise } from '../../util/observable';
 
 import { encodeBody } from "../../services/ui-worker-api";
@@ -54,7 +54,7 @@ export class EditableBody implements BreakpointBody {
 
             const encodedBody = await encodeBody(this._decodedBody, encodings)
                 .catch((e) => {
-                    reportError(e, { encodings });
+                    logError(e, { encodings });
                     return this._decodedBody; // If encoding fails, we send raw data instead
                 });
 

@@ -4,13 +4,18 @@ import { observable, action, autorun, runInAction, reaction, computed } from 'mo
 import { observer, disposeOnUnmount } from 'mobx-react';
 import * as Randexp from 'randexp';
 
-import { matchers, Method } from "mockttp";
+import { matchers, Method, RawHeaders } from "mockttp";
 
-import { Headers } from '../../types';
 import { css, styled } from '../../styles';
 
 import { tryParseJson } from '../../util';
 import { asError, UnreachableCheck } from '../../util/error';
+import {
+    FlatHeaders,
+    headersToFlatHeaders,
+    headersToRawHeaders,
+    rawHeadersToHeaders
+} from '../../util/headers';
 
 import {
     Matcher,
@@ -21,7 +26,8 @@ import {
     AdditionalMatcherKey,
     getRulePartKey,
     isHiddenMatcherKey
-} from "../../model/rules/rules";
+} from '../../model/rules/rules';
+import { summarizeMatcherClass } from '../../model/rules/rule-descriptions';
 import {
     WebSocketMethodMatcher
 } from '../../model/rules/definitions/websocket-rule-definitions';
@@ -48,8 +54,7 @@ import {
 import { Select, TextInput } from '../common/inputs';
 import { EditablePairs, PairsArray } from '../common/editable-pairs';
 import { EditableHeaders } from '../common/editable-headers';
-import { ThemedSelfSizedEditor } from '../editor/base-editor';
-import { summarizeMatcherClass } from '../../model/rules/rule-descriptions';
+import { SelfSizedEditor } from '../editor/base-editor';
 
 type MatcherConfigProps<M extends Matcher> = {
     matcher?: M;
@@ -778,38 +783,13 @@ class ExactQueryMatcherConfig extends MatcherConfig<matchers.ExactQueryMatcher> 
     }
 }
 
-type FlatHeaders = { [key: string]: string };
-
-const headersToFlatHeaders = (headers: Headers): FlatHeaders =>
-    _.mapValues(
-        _.pickBy(headers, (key, value) => key && value),
-        (value) =>
-            _.isArray(value)
-                ? value.join(', ')
-                : value! // We know this is set because of filter above
-    );
-
-
 @observer
 class HeaderMatcherConfig extends MatcherConfig<matchers.HeaderMatcher> {
 
-    @observable
-    private headers: Headers = {};
-
-    componentDidMount() {
-        disposeOnUnmount(this, reaction(
-            () => this.props.matcher ? this.props.matcher.headers : {},
-            (headers) => {
-                if (!_.isEqual(headers, headersToFlatHeaders(this.headers))) {
-                    this.headers = headers;
-                }
-            },
-            { fireImmediately: true }
-        ));
-    }
-
     render() {
         const { matcherIndex } = this.props;
+
+        const headers = this.props.matcher?.headers || {};
 
         return <MatcherConfigContainer>
             { matcherIndex !== undefined &&
@@ -817,38 +797,30 @@ class HeaderMatcherConfig extends MatcherConfig<matchers.HeaderMatcher> {
                     { matcherIndex !== 0 && 'and ' } with headers including
                 </ConfigLabel>
             }
-            <EditableHeaders
-                headers={this.headers}
+            <EditableHeaders<FlatHeaders>
+                headers={headers}
+                convertToRawHeaders={this.convertInput}
+                convertFromRawHeaders={this.convertResult}
                 onChange={this.onChange}
+                onInvalidState={this.props.onInvalidState}
             />
         </MatcherConfigContainer>;
     }
 
+    convertInput(input: FlatHeaders) {
+        return headersToRawHeaders(input);
+    }
+
+    convertResult(result: RawHeaders) {
+        return headersToFlatHeaders(rawHeadersToHeaders(result));
+    }
+
     @action.bound
-    onChange(headers: Headers) {
-        this.headers = headers;
-
-        try {
-            if (Object.values(headers).some(value => !value)) {
-                throw new Error("Invalid headers; header values can't be empty");
-            }
-            if (Object.keys(headers).some(key => !key)) {
-                throw new Error("Invalid headers; header names can't be empty");
-            }
-
-            if (Object.keys(headers).length === 0) {
-                this.props.onChange();
-            } else {
-                this.props.onChange(new matchers.HeaderMatcher(
-                    // We convert here rather than using convertResult on EditableHeaders to ensure we
-                    // preserve & nicely handle invalid input (like missing header values) that would
-                    // is lost during flatHeader conversion.
-                    headersToFlatHeaders(this.headers)
-                ));
-            }
-        } catch (e) {
-            console.log(e);
-            this.props.onInvalidState();
+    onChange(headers: FlatHeaders) {
+        if (Object.keys(headers).length === 0) {
+            this.props.onChange();
+        } else {
+            this.props.onChange(new matchers.HeaderMatcher(headers));
         }
     }
 }
@@ -922,7 +894,7 @@ class RawBodyMatcherConfig<
                 </ConfigLabel>
             }
             <BodyContainer>
-                <ThemedSelfSizedEditor
+                <SelfSizedEditor
                     contentId={null}
                     value={content}
                     onChange={this.onBodyChange}
@@ -1013,7 +985,7 @@ class JsonMatcherConfig<
                 </ConfigLabel>
             }
             <BodyContainer error={!!error}>
-                <ThemedSelfSizedEditor
+                <SelfSizedEditor
                     contentId={null}
                     value={content}
                     onChange={this.onBodyChange}
@@ -1132,7 +1104,7 @@ class EthParamsMatcherConfig extends MatcherConfig<EthereumParamsMatcher> {
                 </ConfigLabel>
             }
             <BodyContainer error={!!error}>
-                <ThemedSelfSizedEditor
+                <SelfSizedEditor
                     contentId={null}
                     value={content}
                     onChange={this.onJsonChange}

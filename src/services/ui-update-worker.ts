@@ -1,4 +1,4 @@
-import { initSentry, reportError } from '../errors';
+import { initSentry, logError } from '../errors';
 initSentry(process.env.SENTRY_DSN);
 
 import * as localForage from 'localforage';
@@ -8,7 +8,7 @@ import { PrecacheController } from 'workbox-precaching'
 import { ExpirationPlugin } from 'workbox-expiration';
 import { StaleWhileRevalidate, NetworkOnly } from 'workbox-strategies';
 
-import * as appPackage from '../../package.json';
+import packageMetadata from '../../package.json';
 import { getServerVersion } from './server-api';
 import { lastServerVersion, versionSatisfies } from './service-versions';
 import { delay } from '../util/promise';
@@ -56,6 +56,9 @@ const __precacheManifest = self.__WB_MANIFEST; // This is injected by webpack's 
 
 function getPrecacheController() {
     const controller = new PrecacheController();
+    // Errors will appear here if running from 'localhost' in dev mode - that's fine, we
+    // don't inject this in dev mode, nothing to worry about. If you want to test this, use
+    // a prod build instead (npm run start:prod)
     controller.addToCacheList(__precacheManifest);
     return controller;
 }
@@ -67,7 +70,7 @@ async function precacheNewVersionIfSupported(event: ExtendableEvent) {
     if (await forceUpdateRequired) {
         // Don't bother precaching: we want to take over & then force kill/refresh everything ASAP
         self.skipWaiting();
-        reportError("Force update required on newly installed SW");
+        logError("Force update required on newly installed SW");
         return;
     }
 
@@ -90,7 +93,7 @@ async function checkServerVersion() {
             "active SW", !!self.registration?.active
         );
 
-        reportError(e);
+        logError(e);
 
         // This isn't perfect, but it's a pretty good approximation of when it's safe to update
         // This only happens if we get an outdated authToken (possible) or we start before the server.
@@ -104,10 +107,10 @@ async function checkServerVersion() {
 
     console.log(`Connected httptoolkit-server version is ${serverVersion}.`);
     console.log(`App requires server version satisfying ${
-        appPackage.runtimeDependencies['httptoolkit-server']
+        packageMetadata.runtimeDependencies['httptoolkit-server']
     }.`);
 
-    if (!versionSatisfies(serverVersion, appPackage.runtimeDependencies['httptoolkit-server'])) {
+    if (!versionSatisfies(serverVersion, packageMetadata.runtimeDependencies['httptoolkit-server'])) {
         throw new Error(
             `New app version ${appVersion} available, but server ${
                 await serverVersion
@@ -140,7 +143,7 @@ self.addEventListener('install', (event: ExtendableEvent) => {
         .catch((rawError) => {
             console.log(rawError);
             const error = new Error("SW precache failed: " + rawError.message);
-            reportError(error);
+            logError(error);
             throw error;
         })
     );
@@ -151,7 +154,7 @@ self.addEventListener('activate', async (event) => {
         console.log(`SW activating for version ${appVersion}`);
 
         if (await forceUpdateRequired) {
-            reportError("Force update required on newly activated SW");
+            logError("Force update required on newly activated SW");
 
             resettingSw = true; // Pass through all requests
 
@@ -267,7 +270,7 @@ function brokenCacheResponse(event: FetchEvent): Promise<Response> {
     // This can happen if the precache somehow disappears. Though in theory
     // that shouldn't happen, it does seem to very occasionally, and it
     // then breaks app loading. If this does somehow happen, refresh everything:
-    reportError(`Null result for ${event.request.url}, resetting SW.`);
+    logError(`Null result for ${event.request.url}, resetting SW.`);
 
     // Refresh the SW (won't take effect until after all pages unload).
     self.registration.unregister();

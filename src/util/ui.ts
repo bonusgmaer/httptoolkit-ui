@@ -1,13 +1,23 @@
 import * as React from 'react';
 import { useHotkeys as rawUseHotkeys } from "react-hotkeys-hook";
+import { action, observable } from 'mobx';
 
 import { desktopVersion } from '../services/service-versions';
 import { getDeferred, delay } from './promise';
-import { reportError } from '../errors';
+import { logError } from '../errors';
 
 export function isReactElement(node: any): node is React.ReactElement {
     return node && !!node.$$typeof;
 }
+
+export const windowSize = observable({
+    height: window.innerHeight,
+    width: window.innerWidth
+});
+window.addEventListener('resize', action(() => {
+    windowSize.height = window.innerHeight;
+    windowSize.width = window.innerWidth;
+}));
 
 export const Ctrl = navigator.platform.startsWith('Mac')
     ? '⌘'
@@ -156,18 +166,51 @@ export function useSize(ref: React.RefObject<HTMLElement>, defaultValue: number)
             if (container) {
                 setSpaceAvailable(container.clientWidth);
             } else {
-                reportError("Element resized, but no ref available");
+                logError("Element resized, but no ref available");
             }
         });
 
         if (ref.current) {
             resizeObserver.observe(ref.current);
         } else {
-            reportError("No element to observe for resizing!");
+            logError("No element to observe for resizing!");
         }
 
         return () => resizeObserver.disconnect();
     }, []);
 
     return spaceAvailable;
+}
+
+export async function copyToClipboard(textToCopy: string) {
+    if (navigator.clipboard) {
+        // This will be available on secure domains in supported browsers. It requires
+        // permissions, but not during Electron usage. We ignore permissions here -
+        // if this fails (on secure web usage outside Electron) we'll use the fallback.
+        try {
+            await navigator.clipboard.writeText(textToCopy);
+            return; // If this succeeds, we're done
+        } catch (e) {
+            console.warn('Copy to clipboard with navigator.clipboard failed', e);
+            // Didn't succeed - keep going
+        }
+    }
+
+    // This should work everywhere, as long as this method is called from an
+    // event handler:
+    const textArea = document.createElement("textarea");
+    try {
+        textArea.value = textToCopy;
+        textArea.style.position = "absolute";
+        textArea.style.left = "-9999px";
+
+        document.body.prepend(textArea);
+        textArea.select();
+        document.execCommand('copy');
+    } catch (e) {
+        console.warn('Copy to clipboard fallback failed', e);
+        throw e;
+    } finally {
+        textArea.remove();
+    }
 }

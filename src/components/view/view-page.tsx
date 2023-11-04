@@ -14,23 +14,27 @@ import { observer, disposeOnUnmount, inject } from 'mobx-react';
 import * as portals from 'react-reverse-portal';
 
 import { WithInjected, CollectedEvent } from '../../types';
-import { styled } from '../../styles';
-import { useHotkeys, isEditable } from '../../util/ui';
+import { NARROW_LAYOUT_BREAKPOINT, styled } from '../../styles';
+import { useHotkeys, isEditable, windowSize } from '../../util/ui';
 import { debounceComputed } from '../../util/observable';
 import { UnreachableCheck } from '../../util/error';
 
-import { UiStore } from '../../model/ui-store';
+import { UiStore } from '../../model/ui/ui-store';
 import { ProxyStore } from '../../model/proxy-store';
 import { EventsStore } from '../../model/events/events-store';
+import { RulesStore } from '../../model/rules/rules-store';
+import { AccountStore } from '../../model/account/account-store';
 import { HttpExchange } from '../../model/http/exchange';
 import { FilterSet } from '../../model/filters/search-filters';
+import { buildRuleFromExchange } from '../../model/rules/rule-creation';
 
 import { SplitPane } from '../split-pane';
 import { EmptyState } from '../common/empty-state';
-import { ThemedSelfSizedEditor } from '../editor/base-editor';
+import { SelfSizedEditor } from '../editor/base-editor';
 
 import { ViewEventList } from './view-event-list';
 import { ViewEventListFooter } from './view-event-list-footer';
+import { ViewEventContextMenuBuilder } from './view-context-menu-builder';
 import { HttpDetailsPane } from './http/http-details-pane';
 import { TlsFailureDetailsPane } from './tls/tls-failure-details-pane';
 import { TlsTunnelDetailsPane } from './tls/tls-tunnel-details-pane';
@@ -43,6 +47,8 @@ interface ViewPageProps {
     eventsStore: EventsStore;
     proxyStore: ProxyStore;
     uiStore: UiStore;
+    accountStore: AccountStore;
+    rulesStore: RulesStore;
     navigate: (path: string) => void;
     eventId?: string;
 }
@@ -103,14 +109,25 @@ type EditorKey = typeof EDITOR_KEYS[number];
 @inject('eventsStore')
 @inject('proxyStore')
 @inject('uiStore')
+@inject('accountStore')
+@inject('rulesStore')
 @observer
 class ViewPage extends React.Component<ViewPageProps> {
 
+    @computed
+    private get splitDirection(): 'vertical' | 'horizontal' {
+        if (windowSize.width >= NARROW_LAYOUT_BREAKPOINT) {
+            return 'vertical';
+        } else {
+            return 'horizontal';
+        }
+    }
+
     private readonly editors = EDITOR_KEYS.reduce((v, key) => ({
         ...v,
-        [key]: portals.createHtmlPortalNode<typeof ThemedSelfSizedEditor>()
+        [key]: portals.createHtmlPortalNode<typeof SelfSizedEditor>()
     }), {} as {
-        [K in EditorKey]: portals.HtmlPortalNode<typeof ThemedSelfSizedEditor>
+        [K in EditorKey]: portals.HtmlPortalNode<typeof SelfSizedEditor>
     });
 
     searchInputRef = React.createRef<HTMLInputElement>();
@@ -156,10 +173,33 @@ class ViewPage extends React.Component<ViewPageProps> {
         });
     }
 
+    private readonly contextMenuBuilder = new ViewEventContextMenuBuilder(
+        this.props.accountStore,
+        this.props.uiStore,
+        this.onPin,
+        this.onDelete,
+        this.onBuildRuleFromExchange
+    );
+
     componentDidMount() {
+        disposeOnUnmount(this, observe(this, 'selectedEvent', ({ oldValue, newValue }) => {
+            if (this.splitDirection !== 'horizontal') return;
+
+            // In horizontal mode, the details pane appears and disappears, so we need to do some
+            // tricks to stop the scroll position in the list doing confusing things.
+
+            if (!oldValue && newValue) {
+                // If we're bringing the details pane into view, we want to jump to where we were
+                // but then shift slightly to make sure the selected row is visible too.
+                setTimeout(() => {
+                    if (!this.selectedEvent) return;
+                    this.listRef.current?.scrollToEvent(this.selectedEvent);
+                }, 50); // We need to delay slightly to let DOM and then UI state catch up
+            }
+        }));
+
         disposeOnUnmount(this, autorun(() => {
             if (!this.props.eventId) return;
-
             const selectedEvent = this.selectedEvent;
 
             // If you somehow have a non-existent event selected, unselect it
@@ -168,31 +208,31 @@ class ViewPage extends React.Component<ViewPageProps> {
                 return;
             }
 
-            const { expandedCard } = this.props.uiStore;
+            const { expandedViewCard } = this.props.uiStore;
 
-            if (!expandedCard) return;
+            if (!expandedViewCard) return;
 
             // If you have a pane expanded, and select an event with no data
             // for that pane, then disable the expansion
             if (
                 !(selectedEvent.isHttp()) ||
                 (
-                    expandedCard === 'requestBody' &&
+                    expandedViewCard === 'requestBody' &&
                     !selectedEvent.hasRequestBody() &&
                     !selectedEvent.requestBreakpoint
                 ) ||
                 (
-                    expandedCard === 'responseBody' &&
+                    expandedViewCard === 'responseBody' &&
                     !selectedEvent.hasResponseBody() &&
                     !selectedEvent.responseBreakpoint
                 ) ||
                 (
-                    expandedCard === 'webSocketMessages' &&
+                    expandedViewCard === 'webSocketMessages' &&
                     !selectedEvent.isWebSocket()
                 )
             ) {
                 runInAction(() => {
-                    this.props.uiStore.expandedCard = undefined;
+                    this.props.uiStore.expandedViewCard = undefined;
                 });
                 return;
             }
@@ -224,11 +264,15 @@ class ViewPage extends React.Component<ViewPageProps> {
 
         const { filteredEvents, filteredEventCount } = this.filteredEventState;
 
-        let rightPane: JSX.Element;
+        let rightPane: JSX.Element | null;
         if (!this.selectedEvent) {
-            rightPane = <EmptyState icon={['fas', 'arrow-left']}>
-                Select an exchange to see the full details.
-            </EmptyState>;
+            if (this.splitDirection === 'vertical') {
+                rightPane = <EmptyState key='details' icon={['fas', 'arrow-left']}>
+                    Select an exchange to see the full details.
+                </EmptyState>;
+            } else {
+                rightPane = null;
+            }
         } else if (this.selectedEvent.isHttp()) {
             rightPane = <HttpDetailsPane
                 exchange={this.selectedEvent}
@@ -240,6 +284,7 @@ class ViewPage extends React.Component<ViewPageProps> {
                 navigate={this.props.navigate}
                 onDelete={this.onDelete}
                 onScrollToEvent={this.onScrollToCenterEvent}
+                onBuildRuleFromExchange={this.onBuildRuleFromExchange}
             />;
         } else if (this.selectedEvent.isTlsFailure()) {
             rightPane = <TlsFailureDetailsPane
@@ -272,6 +317,10 @@ class ViewPage extends React.Component<ViewPageProps> {
             throw new UnreachableCheck(this.selectedEvent);
         }
 
+        const minSize = this.splitDirection === 'vertical'
+            ? 300
+            : 200;
+
         return <div className={this.props.className}>
             <ViewPageKeyboardShortcuts
                 selectedEvent={this.selectedEvent}
@@ -281,12 +330,14 @@ class ViewPage extends React.Component<ViewPageProps> {
                 onClear={this.onForceClear}
                 onStartSearch={this.onStartSearch}
             />
+
             <SplitPane
-                split='vertical'
+                split={this.splitDirection}
                 primary='second'
                 defaultSize='50%'
-                minSize={300}
-                maxSize={-300}
+                minSize={minSize}
+                maxSize={-minSize}
+                hiddenPane={rightPane === null ? '2' : undefined}
             >
                 <LeftPane>
                     <ViewEventListFooter // Footer above the list to ensure correct tab order
@@ -307,15 +358,21 @@ class ViewPage extends React.Component<ViewPageProps> {
                         moveSelection={this.moveSelection}
                         onSelected={this.onSelected}
 
+                        contextMenuBuilder={this.contextMenuBuilder}
+
                         ref={this.listRef}
                     />
                 </LeftPane>
-                { rightPane }
+                {
+                    rightPane ?? <div />
+                    // The <div/> is hidden by hiddenPane, so does nothing, but avoids
+                    // a React error in react-split-pane for undefined children
+                }
             </SplitPane>
 
             {Object.values(this.editors).map((node, i) =>
                 <portals.InPortal key={i} node={node}>
-                    <ThemedSelfSizedEditor
+                    <SelfSizedEditor
                         contentId={null}
                     />
                 </portals.InPortal>
@@ -360,8 +417,17 @@ class ViewPage extends React.Component<ViewPageProps> {
     }
 
     @action.bound
-    onPin(event: HttpExchange) {
+    onPin(event: CollectedEvent) {
         event.pinned = !event.pinned;
+    }
+
+    @action.bound
+    onBuildRuleFromExchange(exchange: HttpExchange) {
+        const { rulesStore, navigate } = this.props;
+
+        const rule = buildRuleFromExchange(exchange);
+        rulesStore!.draftRules.items.unshift(rule);
+        navigate(`/mock/${rule.id}`);
     }
 
     @action.bound
@@ -454,7 +520,9 @@ const LeftPane = styled.div`
 
 const StyledViewPage = styled(
     // Exclude stores etc from the external props, as they're injected
-    ViewPage as unknown as WithInjected<typeof ViewPage, 'uiStore' | 'proxyStore' | 'eventsStore' | 'navigate'>
+    ViewPage as unknown as WithInjected<typeof ViewPage,
+        'uiStore' | 'proxyStore' | 'eventsStore' | 'rulesStore' | 'accountStore' | 'navigate'
+    >
 )`
     height: 100vh;
     position: relative;

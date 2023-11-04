@@ -20,7 +20,8 @@ import {
     HtkResponse,
     Html
 } from "../../types";
-import { firstMatch, empty, lastHeader } from '../../util';
+import { firstMatch, empty } from '../../util';
+import { lastHeader } from '../../util/headers';
 import { formatAjvError } from '../../util/json-schema';
 
 import {
@@ -32,7 +33,7 @@ import {
     ApiParameter
 } from './api-interfaces';
 import { OpenApiMetadata } from './build-api-metadata';
-import { fromMarkdown } from '../markdown';
+import { fromMarkdown } from '../ui/markdown';
 
 const paramValidator = new Ajv({
     coerceTypes: 'array',

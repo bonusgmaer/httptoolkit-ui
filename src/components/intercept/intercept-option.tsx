@@ -3,10 +3,12 @@ import * as React from 'react';
 import { action, observable } from 'mobx';
 import { observer, inject } from 'mobx-react';
 
-import { styled } from '../../styles';
+import { NARROW_LAYOUT_BREAKPOINT, styled, popColor } from '../../styles';
 import { Icon } from '../../icons';
 import { trackEvent } from '../../metrics';
-import { reportError } from '../../errors';
+import { logError } from '../../errors';
+import { windowSize } from '../../util/ui';
+
 import { Interceptor } from '../../model/interception/interceptors';
 import { InterceptorStore } from '../../model/interception/interceptor-store';
 
@@ -69,6 +71,7 @@ const BackgroundIcons = styled.div`
 `;
 
 const InterceptOptionCard = styled(LittleCard)<{
+    gridWidth: number,
     disabled: boolean,
     expanded: boolean,
     index: number,
@@ -83,7 +86,10 @@ const InterceptOptionCard = styled(LittleCard)<{
             return `order: ${p.index};`;
         }
 
-        const width = p.uiConfig.columnWidth;
+        const width = Math.min(
+            p.uiConfig.columnWidth,
+            p.gridWidth
+        );
         const height = p.uiConfig.rowHeight;
 
         // Tweak the order to try and keep cards in the same place as
@@ -140,7 +146,8 @@ const LoadingOverlay = styled.div`
 
 export const StatusPill = styled(Pill)`
     white-space: normal; /* Useful for layout in tiny screens, e.g. the 'proxy port' badge */
-    && { margin: auto 0 0 0; }
+
+    margin-top: auto;
 `;
 
 function getStatusPill(interceptor: Interceptor) {
@@ -161,7 +168,7 @@ function getStatusPill(interceptor: Interceptor) {
                 }
             </StatusPill>;
         } else {
-            return <StatusPill color='#e1421f'>
+            return <StatusPill color={popColor}>
                 Coming soon
             </StatusPill>;
         }
@@ -199,12 +206,17 @@ export class InterceptOption extends React.Component<InterceptOptionProps> {
             ? interceptor.iconProps
             : [interceptor.iconProps];
 
+        const gridWidth = windowSize.width >= NARROW_LAYOUT_BREAKPOINT
+            ? 4
+            : 3;
+
         return <InterceptOptionCard
             ref={this.cardRef}
 
             index={index}
             expanded={expanded}
             uiConfig={uiConfig}
+            gridWidth={gridWidth}
 
             disabled={isDisabled}
             onKeyDown={clickOnEnter}
@@ -313,7 +325,7 @@ export class InterceptOption extends React.Component<InterceptOptionProps> {
             onActivationStarted();
             activateInterceptor(interceptor.activationOptions)
             .then(() => onActivationSuccessful())
-            .catch((e) => reportError(e));
+            .catch((e) => logError(e));
         }
     }
 
