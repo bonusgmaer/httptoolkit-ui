@@ -10,9 +10,12 @@ import type {
     SubscribableEvent as MockttpEvent,
     Headers,
     RawHeaders,
+    Trailers,
+    RawTrailers,
     TimingEvents,
     TlsHandshakeFailure,
     TlsPassthroughEvent,
+    TlsSocketMetadata,
     ClientError
 } from 'mockttp';
 import type { PortRange } from 'mockttp/dist/mockttp';
@@ -38,6 +41,7 @@ import type { RTCDataChannel } from './model/webrtc/rtc-data-channel';
 import type { RTCMediaTrack } from './model/webrtc/rtc-media-track';
 
 import type { TrafficSource } from './model/http/sources';
+import type { EditableBody } from './model/http/editable-body';
 import type { ViewableContentType } from './model/events/content-types';
 
 // These are the HAR types as returned from parseHar(), not the raw types as defined in the HAR itself
@@ -91,18 +95,12 @@ export type InputRTCMediaTrackClosed = InputRTCEventData['media-track-closed'];
 
 export type InputStreamMessage = InputRTCMessage | InputWebSocketMessage;
 
-export interface BreakpointBody {
-    decoded: Buffer;
-    encoded: ObservablePromise<Buffer>;
-    contentLength: number;
-}
-
 // Define the restricted form of request BP result we'll use internally
 export type BreakpointRequestResult = {
     method: string,
     url: string,
     rawHeaders: RawHeaders,
-    body: BreakpointBody
+    body: EditableBody
 };
 
 // We still need this for the places where we actually interact with Mockttp
@@ -117,7 +115,7 @@ export type BreakpointResponseResult = {
     statusCode: number,
     statusMessage?: string,
     rawHeaders: RawHeaders,
-    body: BreakpointBody
+    body: EditableBody
 };
 
 export {
@@ -130,7 +128,9 @@ export type HtkRequest = Omit<InputRequest, 'body' | 'path'> & {
     source: TrafficSource,
     contentType: ViewableContentType,
     cache: Map<symbol, unknown>,
-    body: MessageBody
+    body: MessageBody,
+    trailers?: Trailers,
+    rawTrailers?: RawTrailers
 };
 
 export type HtkResponse = Omit<InputResponse, 'body'> & {
@@ -171,8 +171,11 @@ export type RTCStream = RTCDataChannel | RTCMediaTrack;
 export {
     Headers,
     RawHeaders,
+    Trailers,
+    RawTrailers,
     PortRange,
-    TimingEvents
+    TimingEvents,
+    TlsSocketMetadata
 };
 
 // Should only be created in the process of sanitizing, so every object with an

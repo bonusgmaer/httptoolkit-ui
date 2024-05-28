@@ -1,9 +1,11 @@
 import * as path from 'path';
 import merge from "webpack-merge";
-import SentryPlugin from '@sentry/webpack-plugin';
+import * as SentryPlugin from '@sentry/webpack-plugin';
 
 import { InjectManifest } from 'workbox-webpack-plugin';
 import * as ssri from "ssri";
+
+import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';
 
 import common from "./webpack.common";
 
@@ -22,16 +24,38 @@ export default merge(common, {
     // Automatically split into source/vendor bundle chunks.
     // Here because this breaks TS-node in the tests, not clear why.
     optimization: {
+        chunkIds: 'named',
         splitChunks: {
-            chunks: (chunk) => {
-                // React monaco editor is 99.99% vendor code, so splitting it
-                // just creates an absurdly tiny extra bundle.
-                return chunk.name !== "react-monaco-editor";
-            },
+            chunks: 'all',
+
+            // Split out various extra chunks for libraries that we know to be large & either
+            // rarely used or updated differently to other code in the frontend. The goal is to
+            // avoid re-downloading large non-updated libs when often-updated libs change.
+            // This is a bit suspect - definitely more art then science right now.
             cacheGroups: {
+                // Zstd is rarely used, big-ish, always loaded async, and v rarely changed:
                 zstd: {
                     test: /[\\/]node_modules[\\/]zstd-codec[\\/]/,
-                    name: "zstd"
+                    name: 'zstd'
+                },
+
+                // Monaco is loaded async, v large, and rarely changed:
+                monaco: {
+                    test: /[\\/]node_modules[\\/](monaco-editor|react-monaco-editor)[\\/]/,
+                    name: 'monaco'
+                },
+
+                // APIs change on a completely independent schedule to anything else:
+                apis: {
+                    test: /[\\/]node_modules[\\/]openapi-directory[\\/]/,
+                    name: 'apis'
+                },
+
+                // Mockttp is relatively frequently changed, so pulling it into
+                // a separate chunk avoids churn elsewhere:
+                mockttp: {
+                    test: /[\\/]node_modules[\\/]mockttp[\\/]/,
+                    name: 'mockttp'
                 }
             }
         }
@@ -71,12 +95,22 @@ export default merge(common, {
         }),
         ...(shouldPublishSentryRelease
         ? [
-            new SentryPlugin({
-                release: process.env.UI_VERSION,
-                include: common!.output!.path!,
-                validate: true
+            SentryPlugin.sentryWebpackPlugin({
+                release: {
+                    name: process.env.UI_VERSION!,
+                    setCommits: {
+                        auto: true,
+                        ignoreEmpty: true,
+                        ignoreMissing: true
+                    }
+                }
             })
         ]
-        : [])
+        : []),
+        new BundleAnalyzerPlugin({
+            analyzerMode: 'static',
+            openAnalyzer: false,
+            excludeAssets: /api\/.*\.json/
+        })
     ]
 });

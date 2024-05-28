@@ -40,7 +40,7 @@ import {
 } from './services/update-management';
 
 import { App } from './components/app';
-import { StorePoweredThemeProvider } from './components/store-powered-theme-provider';
+import { StyleProvider } from './components/style-provider';
 import { ErrorBoundary } from './components/error-boundary';
 
 console.log(`Initialising UI (version ${UI_VERSION})`);
@@ -82,7 +82,7 @@ const rulesStore = new RulesStore(accountStore, proxyStore,
     }
 );
 const eventsStore = new EventsStore(proxyStore, apiStore, rulesStore);
-const sendStore = new SendStore(eventsStore, rulesStore);
+const sendStore = new SendStore(accountStore, eventsStore, rulesStore);
 
 const stores = {
     accountStore,
@@ -110,12 +110,12 @@ appStartupPromise.then(() => {
     document.dispatchEvent(new Event('load:rendering'));
     ReactDOM.render(
         <Provider {...stores}>
-            <StorePoweredThemeProvider>
+            <StyleProvider>
                 <ErrorBoundary>
                     <GlobalStyles />
                     <App />
                 </ErrorBoundary>
-            </StorePoweredThemeProvider>
+            </StyleProvider>
         </Provider>
     , document.querySelector(APP_ELEMENT_SELECTOR))
 });
@@ -150,3 +150,7 @@ Promise.race([
         });
     });
 });
+
+if (module.hot) {
+    module.hot.accept();
+}

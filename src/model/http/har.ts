@@ -6,6 +6,7 @@ import * as querystring from 'querystring';
 
 import {
     Headers,
+    Trailers,
     HtkRequest,
     HarRequest,
     HarResponse,
@@ -14,10 +15,10 @@ import {
     TimingEvents,
     FailedTlsConnection,
     InputWebSocketMessage,
-    InputTlsFailure
+    TlsSocketMetadata
 } from '../../types';
 
-import { stringToBuffer } from '../../util';
+import { stringToBuffer } from '../../util/buffer';
 import { lastHeader } from '../../util/headers';
 import { ObservablePromise } from '../../util/observable';
 import { unreachableCheck } from '../../util/error';
@@ -60,6 +61,11 @@ export interface ExtendedHarRequest extends HarFormat.Request {
         | 'discarded:not-representable'
         | 'discarded:not-decodable';
     _content?: RequestContentData;
+    _trailers?: HarFormat.Header[];
+}
+
+export interface ExtendedHarResponse extends HarFormat.Response {
+    _trailers?: HarFormat.Header[];
 }
 
 export interface HarEntry extends HarFormat.Entry {
@@ -85,6 +91,8 @@ export type HarTlsErrorEntry = {
     time: number; // Floating-point high-resolution duration, in ms
     hostname?: string; // Undefined if connection fails before hostname received
     cause: FailedTlsConnection['failureCause'];
+
+    tlsMetadata?: TlsSocketMetadata;
 
     clientIPAddress: string;
     clientPort: number;
@@ -118,7 +126,7 @@ export async function generateHar(
     };
 }
 
-function asHarHeaders(headers: Headers) {
+function asHarHeaders(headers: Headers | Trailers) {
     return _.map(headers, (headerValue, headerKey) => ({
         name: headerKey,
         value: _.isArray(headerValue)
@@ -165,6 +173,9 @@ export function generateHarRequest(
         httpVersion: `HTTP/${request.httpVersion || '1.1'}`,
         cookies: [],
         headers: asHarHeaders(request.headers),
+        ...(request.trailers ? {
+            _trailers: asHarHeaders(request.trailers)
+        } : {}),
         queryString: Array.from(request.parsedUrl.searchParams.entries()).map(
             ([paramKey, paramValue]) => ({
                 name: paramKey,
@@ -457,7 +468,8 @@ function generateHarTlsError(event: FailedTlsConnection): HarTlsErrorEntry {
         cause: event.failureCause,
         hostname: event.upstreamHostname,
         clientIPAddress: event.remoteIpAddress,
-        clientPort: event.remotePort
+        clientPort: event.remotePort,
+        tlsMetadata: event.tlsMetadata
     };
 }
 
@@ -582,6 +594,7 @@ export async function parseHar(harContents: unknown): Promise<ParsedHar> {
                 hostname: entry.hostname,
                 remoteIpAddress: entry.clientIPAddress,
                 remotePort: entry.clientPort,
+                tlsMetadata: entry.tlsMetadata ?? {},
                 tags: [],
                 timingEvents: {
                     startTime: dateFns.parse(entry.startedDateTime).getTime(),
@@ -695,6 +708,7 @@ function parseHarRequest(
         timingEvents,
         tags: [],
         matchedRuleId: false,
+        httpVersion: parseHttpVersion(request.httpVersion, request.headers),
         protocol: request.url.split(':')[0],
         method: request.method,
         url: request.url,
@@ -709,8 +723,31 @@ function parseHarRequest(
                 ? parseHarRequestContents(request._content)
                 : parseHarPostData(request.postData),
             encodedLength: request.bodySize
+        },
+        rawTrailers: request._trailers?.map(t => [t.name, t.value]) ?? [],
+        trailers: asHtkHeaders(request._trailers ?? []) as Trailers
+    }
+}
+
+function parseHttpVersion(
+    versionString: string | undefined,
+    headers: HarFormat.Header[]
+) {
+    if (!versionString) {
+        // Make a best guess:
+        if (headers.some(({ name }) => name.startsWith(':'))) {
+            return '2.0';
+        } else {
+            return '1.1';
         }
     }
+
+    const regexMatch = /^(HTTP\/)?([\d\.]+)$/i.exec(versionString);
+    if (regexMatch) {
+        return regexMatch[2];
+    }
+
+    throw TypeError(`Invalid HTTP version: ${versionString}`);
 }
 
 function parseHarRequestContents(data: RequestContentData): Buffer {
@@ -742,7 +779,7 @@ function parseHarPostData(data: HarFormat.PostData | undefined): Buffer {
 
 function parseHarResponse(
     id: string,
-    response: HarFormat.Response,
+    response: ExtendedHarResponse,
     timingEvents: TimingEvents
 ): HarResponse {
     return {
@@ -761,6 +798,8 @@ function parseHarResponse(
             encodedLength: (!response.bodySize || response.bodySize === -1)
                 ? 0 // If bodySize is missing or inaccessible, just zero it
                 : response.bodySize
-        }
+        },
+        rawTrailers: response._trailers?.map(t => [t.name, t.value]) ?? [],
+        trailers: asHtkHeaders(response._trailers ?? []) as Trailers,
     }
 }

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { action, runInAction } from 'mobx';
+import { action } from 'mobx';
 import { observer, inject } from 'mobx-react';
 
 import { CollectedEvent } from '../../../types';
@@ -8,10 +8,12 @@ import { Ctrl } from '../../../util/ui';
 
 import { HttpExchange } from '../../../model/http/exchange';
 import { RulesStore } from '../../../model/rules/rules-store';
-import { buildRuleFromExchange } from '../../../model/rules/rule-creation';
+import { AccountStore } from '../../../model/account/account-store';
 
 import { HEADER_FOOTER_HEIGHT } from '../view-event-list-footer';
+import { ProPill } from '../../account/pro-placeholders';
 import { IconButton } from '../../common/icon-button';
+import { UnstyledButton } from '../../common/inputs';
 
 const ButtonsContainer = styled.div`
     height: ${HEADER_FOOTER_HEIGHT}px;
@@ -28,7 +30,7 @@ const ButtonsContainer = styled.div`
     justify-content: center;
 
     z-index: 1;
-    box-shadow: 0 -10px 30px -5px rgba(0,0,0,0.1);
+    box-shadow: 0 -10px 30px -5px rgba(0,0,0,${p => p.theme.boxShadowAlpha});
 `;
 
 const ScrollToButton = observer((p: {
@@ -80,11 +82,38 @@ const MockButton = observer((p: {
     onClick={p.onClick}
     title={
         p.isPaidUser
-            ? 'Create a mock rule from this exchange'
+            ? `Create a mock rule from this exchange (${Ctrl}+m)`
             : 'With Pro: create a mock rule from this exchange'
     }
     disabled={!p.isExchange || !p.isPaidUser}
 />);
+
+const SendButton = observer((p: {
+    isExchange: boolean,
+    isPaidUser: boolean,
+    onClick: () => void
+}) => <IconButton
+    icon={['far', 'paper-plane']}
+    onClick={p.onClick}
+    title={p.isPaidUser
+        ? `Resend this request (${Ctrl}+r)`
+        : 'With Pro: Resend this request'
+    }
+    disabled={!p.isExchange || !p.isPaidUser}
+/>);
+
+const ProSeparator = styled(inject('accountStore')((p: {
+    accountStore?: AccountStore,
+    className?: string
+}) => <UnstyledButton
+    onClick={() => p.accountStore!.getPro('http-event-footer')}
+    className={p.className}
+>
+    <ProPill>With Pro:</ProPill>
+</UnstyledButton>))`
+    padding: 0;
+    margin-left: 40px;
+`;
 
 export const HttpDetailsFooter = inject('rulesStore')(
     observer(
@@ -95,6 +124,7 @@ export const HttpDetailsFooter = inject('rulesStore')(
             onDelete: (event: CollectedEvent) => void,
             onScrollToEvent: (event: CollectedEvent) => void,
             onBuildRuleFromExchange: (event: HttpExchange) => void,
+            onPrepareToResendRequest?: (event: HttpExchange) => void,
             isPaidUser: boolean,
             navigate: (url: string) => void
         }) => {
@@ -115,11 +145,24 @@ export const HttpDetailsFooter = inject('rulesStore')(
                     pinned={pinned}
                     onClick={() => props.onDelete(event)}
                 />
+
+                {
+                    !props.isPaidUser &&
+                        <ProSeparator />
+                }
+
                 <MockButton
-                    isExchange={event.isHttp()}
+                    isExchange={event.isHttp() && !event.isWebSocket()}
                     isPaidUser={props.isPaidUser}
                     onClick={() => props.onBuildRuleFromExchange(props.event as HttpExchange)}
                 />
+                { props.onPrepareToResendRequest &&
+                    <SendButton
+                        isExchange={event.isHttp() && !event.isWebSocket()}
+                        isPaidUser={props.isPaidUser}
+                        onClick={() => props.onPrepareToResendRequest!(props.event as HttpExchange)}
+                    />
+                }
             </ButtonsContainer>;
         }
     )

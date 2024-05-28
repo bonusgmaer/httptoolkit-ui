@@ -54,11 +54,11 @@ const Card = styled.section.attrs((p: CardProps) => ({
         opacity: 0.5;
     `}
 
-    ${(p: CardProps) => !p.disabled && p.onClick && `
+    ${(p: CardProps) => !p.disabled && p.onClick && css`
         cursor: pointer;
 
         &:hover {
-            box-shadow: 0 2px 20px 0 rgba(0,0,0,0.3);
+            box-shadow: 0 2px 20px 0 rgba(0,0,0,${p => p.theme.boxShadowAlpha * 2});
         }
 
         &:active {
@@ -68,7 +68,7 @@ const Card = styled.section.attrs((p: CardProps) => ({
 
     background-color: ${p => p.theme.mainBackground};
     border-radius: 4px;
-    box-shadow: 0 2px 10px 0 rgba(0,0,0,0.2);
+    box-shadow: 0 2px 10px 0 rgba(0,0,0,${p => p.theme.boxShadowAlpha});
 
     position: relative;
 
@@ -106,7 +106,7 @@ export const MediumCard = styled(Card)`
 
     > header, > h1 {
         text-transform: uppercase;
-        text-align: right;
+        text-align: ${p => p.headerAlignment};
         color: ${p => p.theme.containerWatermark};
 
         &:not(:last-child) {
@@ -139,6 +139,8 @@ export interface CollapsibleCardProps {
     // The header alignment - defaults to right if not set
     headerAlignment?: 'left' | 'right';
 
+    ariaLabel: string;
+
     className?: string;
 
     onCollapseToggled?: () => void;
@@ -158,6 +160,8 @@ export class CollapsibleCard extends React.Component<
     private cardRef = React.createRef<HTMLElement>();
 
     render() {
+        const collapsable = !!this.props.onCollapseToggled;
+
         return <CollapsibleCardContainer
             className={this.props.className}
             collapsed={this.props.collapsed}
@@ -165,9 +169,10 @@ export class CollapsibleCard extends React.Component<
             direction={this.props.direction}
             headerAlignment={this.props.headerAlignment ?? 'right'}
 
-            tabIndex={0}
+            tabIndex={collapsable ? 0 : undefined}
             ref={this.cardRef}
             onKeyDown={this.onKeyDown}
+            aria-label={this.props.ariaLabel}
         >{
             this.renderChildren()
         }</CollapsibleCardContainer>;
@@ -176,7 +181,7 @@ export class CollapsibleCard extends React.Component<
     renderChildren() {
         const { children, collapsed, headerAlignment } = this.props;
 
-        const showCollapseIcon = !!this.props.onCollapseToggled;
+        const collapsable = !!this.props.onCollapseToggled;
 
         return React.Children.map(children as React.ReactElement<any>[], (child, i) => {
             if (i !== 0) {
@@ -184,7 +189,7 @@ export class CollapsibleCard extends React.Component<
                 else return child;
             }
 
-            if (!showCollapseIcon) return child;
+            if (!collapsable) return child;
 
             // Otherwise: it's the first child and we want to inject a collapse icon.
 
@@ -269,26 +274,30 @@ const CollapsibleCardContainer = styled(MediumCard)<{
         }
     `}
 
-    ${p => p.expanded && css`
-        /* Override the Send container setting this to 'none', which hides non-expanded parts: */
-        display: flex !important;
+    ${p => p.expanded
+        ?  css`
+            /* Override the Send container setting this to 'none', which hides non-expanded parts: */
+            display: flex !important;
 
-        height: 100%;
-        width: 100%;
-        border-radius: 0;
-        margin: 0;
+            height: 100%;
+            width: 100%;
+            border-radius: 0;
+            margin: 0;
 
-        flex-shrink: 1;
-        min-height: 0;
+            flex-shrink: 1;
+            min-height: 0;
 
-        ${p.expanded === 'starting'
-            ? `
-                padding-top: 40px;
-                padding-bottom: 40px;
-            `
-            : 'transition: padding 0.1s;'
-        }
-    `}
+            ${p.expanded === 'starting'
+                ? `
+                    padding-top: 40px;
+                    padding-bottom: 40px;
+                `
+                : 'transition: padding 0.1s;'
+            }
+        `
+        // Show card direction markers only when not expanded
+        : cardDirectionCss(p.direction)
+    }
 
     &:focus {
         ${CollapseIcon} {
@@ -304,8 +313,6 @@ const CollapsibleCardContainer = styled(MediumCard)<{
         outline: none;
         border-color: ${p => p.theme.popColor};
     }
-
-    ${p => cardDirectionCss(p.direction)};
 `;
 
 export const CollapsibleCardHeading = styled((p: {

@@ -46,6 +46,26 @@ export function isObservablePromise<T>(p: any): p is ObservablePromise<T> {
         'state' in p;
 }
 
+export interface ObservableDeferred<T> {
+    resolve: (arg: T) => void,
+    reject: (e?: Error) => void,
+    promise: ObservablePromise<T>
+}
+
+export function getObservableDeferred<T = void>(): ObservableDeferred<T> {
+    let resolve: undefined | ((arg: T) => void) = undefined;
+    let reject: undefined | ((e?: Error) => void) = undefined;
+
+    const promise = observablePromise(new Promise<T>((resolveCb, rejectCb) => {
+        resolve = resolveCb;
+        reject = rejectCb;
+    }));
+
+    // TS thinks we're using these before they're assigned, which is why
+    // we need the undefined types, and the any here.
+    return { resolve, reject, promise } as any;
+}
+
 // Creates an observable promise which doesn't run until somebody tries
 // to check the value or wait for it to resolve somehow.
 export function lazyObservablePromise<T>(p: () => PromiseLike<T>): ObservablePromise<T> {
@@ -146,3 +166,46 @@ export function debounceComputed<T>(
         return computed(debounced(fn, timeoutMs), computedOptions);
     }
 }
+
+// An observable clock, allowing for time-reactive logic & UI, but ticking only while
+// observed, so no intervals etc are required any time it isn't in active use. Closely
+// based on the example in https://mobx.js.org/custom-observables.html.
+class Clock {
+
+    private atom: IAtom = createAtom(
+        "Clock",
+        () => this.startTicking(),
+        () => this.stopTicking()
+    );
+
+    private intervalHandler: ReturnType<typeof setInterval> | null = null;
+    private currentDateTime: number = Date.now();
+
+    getTime() {
+        if (this.atom.reportObserved()) {
+            return this.currentDateTime;
+        } else {
+            return Date.now();
+        }
+    }
+
+    tick() {
+        this.currentDateTime = Date.now();
+        this.atom.reportChanged();
+    }
+
+    startTicking() {
+        this.tick();
+        this.intervalHandler = setInterval(() => this.tick(), 50);
+    }
+
+    stopTicking() {
+        if (this.intervalHandler == null) return;
+
+        clearInterval(this.intervalHandler);
+        this.intervalHandler = null;
+    }
+
+}
+
+export const observableClock = new Clock();

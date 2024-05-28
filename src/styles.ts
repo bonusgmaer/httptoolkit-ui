@@ -12,6 +12,7 @@ const fontSizes = {
     headingSize: '20px',
     largeHeadingSize: '24px',
     loudHeadingSize: '38px',
+    screamingHeadingSize: '80px'
 };
 import "react-contexify/dist/ReactContexify.css";
 
@@ -30,6 +31,7 @@ export const lightTheme = {
 
     lowlightTextOpacity: 0.65,
     pillContrast: 0.8,
+    boxShadowAlpha: 0.2,
 
     primaryInputBackground: '#1076b9',
     primaryInputColor: '#fafafa',
@@ -37,8 +39,10 @@ export const lightTheme = {
     secondaryInputBorder: '#7ab2e2',
     secondaryInputColor: '#1665af',
 
-    textInputBackground: '#fafafa',
-    textInputColor: '#222222',
+    inputBackground: '#fafafa',
+    inputHoverBackground: '#eee',
+    inputBorder: '#a0afaf',
+    inputColor: '#222222',
 
     highlightBackground: '#ffffff',
     highlightColor: '#222',
@@ -75,6 +79,7 @@ export const darkTheme = {
 
     lowlightTextOpacity: 0.6,
     pillContrast: 0.8,
+    boxShadowAlpha: 0.4,
 
     primaryInputBackground: '#0868c1',
     primaryInputColor: '#fafafa',
@@ -82,8 +87,10 @@ export const darkTheme = {
     secondaryInputBorder: '#1b5b96',
     secondaryInputColor: '#6babe6',
 
-    textInputBackground: '#fafafa',
-    textInputColor: '#222222',
+    inputBackground: '#1a1a1a',
+    inputHoverBackground: '#333',
+    inputBorder: '#666',
+    inputColor: '#fafafa',
 
     highlightBackground: '#111111',
     highlightColor: '#efefef',
@@ -108,16 +115,24 @@ export const darkTheme = {
 
     /* In dark theme, we need to override the scrollbars or they stick out like a sore thumb */
     globalCss: styledComponents.css`
-        ::-webkit-scrollbar {
-            background-color: ${p => polished.darken(0.2, p.theme.containerBackground)};
+        @supports (color-scheme: dark) {
+            :root {
+                color-scheme: dark;
+            }
         }
 
-        ::-webkit-scrollbar-thumb {
-            background-color: ${p => polished.lighten(0.2, p.theme.containerBackground)};
-        }
+        @supports not (color-scheme: dark) {
+            ::-webkit-scrollbar {
+                background-color: ${p => polished.darken(0.2, p.theme.containerBackground)};
+            }
 
-        /* Standard, but poorly supported: */
-        scrollbar-color: dark;
+            ::-webkit-scrollbar-thumb {
+                background-color: ${p => polished.lighten(0.2, p.theme.containerBackground)};
+            }
+
+            /* Standard, but poorly supported: */
+            scrollbar-color: dark;
+        }
     `
 };
 
@@ -131,6 +146,7 @@ export const highContrastTheme = {
 
     lowlightTextOpacity: 0.8,
     pillContrast: 0.95,
+    boxShadowAlpha: 0.1,
 
     primaryInputBackground: '#0868c1',
     primaryInputColor: '#ffffff',
@@ -138,8 +154,10 @@ export const highContrastTheme = {
     secondaryInputBorder: '#ffffff',
     secondaryInputColor: '#ffffff',
 
-    textInputBackground: '#ffffff',
-    textInputColor: '#000000',
+    inputBackground: '#ffffff',
+    inputHoverBackground: '#ddd',
+    inputBorder: '#aaa',
+    inputColor: '#000000',
 
     highlightBackground: '#ffffff',
     highlightColor: '#000',
@@ -197,6 +215,7 @@ const {
     createGlobalStyle,
     keyframes,
     ThemeProvider,
+    StyleSheetManager
 } = styledComponents as unknown as styledComponents.ThemedStyledComponentsModule<Theme>;
 
 export {
@@ -205,7 +224,8 @@ export {
     createGlobalStyle,
     keyframes,
     ThemeProvider,
-    ThemeProps
+    type ThemeProps,
+    StyleSheetManager
 };
 
 export const GlobalStyles = createGlobalStyle`
@@ -246,7 +266,7 @@ export const GlobalStyles = createGlobalStyle`
         }
 
         .auth0-lock-widget {
-            box-shadow: 0 2px 10px 0 rgba(0,0,0,0.2) !important;
+            box-shadow: 0 2px 10px 0 rgba(0,0,0,${p => p.theme.boxShadowAlpha}) !important;
             overflow: visible !important;
         }
 

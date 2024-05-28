@@ -32,6 +32,7 @@ import {
 } from '../../common/text-content';
 import { DocsLink } from '../../common/docs-link';
 import { SourceIcon } from '../../common/source-icon';
+import { HttpVersionPill } from '../../common/http-version-pill';
 import { HeaderDetails } from './header-details';
 import { UrlBreakdown } from '../url-breakdown';
 
@@ -87,7 +88,10 @@ const MatchedRulePill = styled(inject('uiStore')((p: {
     }
 `;
 
-const RawRequestDetails = (p: { request: HtkRequest }) => {
+const RawRequestDetails = (p: {
+    request: HtkRequest,
+    httpVersion: 1 | 2
+}) => {
     const methodDocs = getMethodDocs(p.request.method);
     const methodDetails = [
         methodDocs && <Markdown
@@ -133,7 +137,11 @@ const RawRequestDetails = (p: { request: HtkRequest }) => {
         </CollapsibleSection>
 
         <ContentLabelBlock>Headers</ContentLabelBlock>
-        <HeaderDetails headers={p.request.rawHeaders} requestUrl={p.request.parsedUrl} />
+        <HeaderDetails
+            httpVersion={p.httpVersion}
+            headers={p.request.rawHeaders}
+            requestUrl={p.request.parsedUrl}
+        />
     </div>;
 }
 
@@ -164,6 +172,7 @@ export const HttpRequestCard = observer((props: HttpRequestCardProps) => {
                 />
             }
             <SourceIcon source={request.source} />
+            <HttpVersionPill request={request} />
             <Pill color={getSummaryColour(exchange)}>
                 { exchange.isWebSocket() ? 'WebSocket ' : '' }
                 { request.method } {
@@ -177,6 +186,9 @@ export const HttpRequestCard = observer((props: HttpRequestCardProps) => {
             </CollapsibleCardHeading>
         </header>
 
-        <RawRequestDetails request={request} />
+        <RawRequestDetails
+            request={request}
+            httpVersion={exchange.httpVersion}
+        />
     </CollapsibleCard>;
 });

@@ -9,12 +9,11 @@ import {
     MockttpBreakpointRequestResult,
     BreakpointRequestResult,
     BreakpointResponseResult,
-    BreakpointBody,
     MockttpBreakpointResponseResult,
 } from "../../types";
 import { logError } from "../../errors";
 
-import { stringToBuffer } from '../../util';
+import { stringToBuffer } from '../../util/buffer';
 import { getDeferred, Deferred } from "../../util/promise";
 import {
     asHeaderArray,
@@ -30,6 +29,7 @@ import {
     versionSatisfies
 } from '../../services/service-versions';
 import { decodeBody } from "../../services/ui-worker-api";
+
 import { EditableBody } from './editable-body';
 import { getStatusMessage } from "./http-docs";
 
@@ -129,11 +129,11 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
         this.editableBody = new EditableBody(
             decodedBody,
             encodedBody,
-            () => getHeaderValue(this.resultMetadata.rawHeaders, 'Content-Encoding')
+            () => this.resultMetadata.rawHeaders
         );
 
         // Update the content-length when necessary, if it was previously correct
-        observe(this.editableBody, 'contentLength', ({
+        observe(this.editableBody, 'latestEncodedLength', ({
             oldValue: previousEncodedLength,
             newValue: newEncodedLength
         }) => {
@@ -144,7 +144,7 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
             if (previousContentLength === previousEncodedLength) {
                 this.updateMetadata({
                     rawHeaders: withHeaderValue(rawHeaders, {
-                        'Content-Length': newEncodedLength.toString()
+                        'Content-Length': newEncodedLength?.toString() ?? '0'
                     })
                 });
             }
@@ -157,7 +157,7 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
                 const { rawHeaders } = this.resultMetadata;
                 this.updateMetadata({
                     rawHeaders: withHeaderValue(rawHeaders, {
-                        'Content-Length': this.editableBody.contentLength.toString()
+                        'Content-Length': this.editableBody.latestEncodedLength?.toString() ?? '0'
                     })
                 });
             }
@@ -169,7 +169,7 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
     get inProgressResult(): T {
         return Object.assign(
             {
-                body: this.editableBody as BreakpointBody
+                body: this.editableBody as EditableBody
             },
             this.resultMetadata,
         ) as T;
@@ -198,9 +198,9 @@ export abstract class Breakpoint<T extends BreakpointInProgress> {
 
             ...(versionSatisfies(await serverVersion, RAW_BODY_SUPPORTED)
                 // Mockttp v3+ skips auto-encoding only if you use rawBody:
-                ? { rawBody: await this.editableBody.encoded }
+                ? { rawBody: await this.editableBody.encodingBestEffortPromise }
                 // Old Mockttp doesn't support rawBody, never auto-encodes:
-                : { body: await this.editableBody.encoded }
+                : { body: await this.editableBody.encodingBestEffortPromise }
             ),
 
             // Psuedo-headers those will be generated automatically from the other,

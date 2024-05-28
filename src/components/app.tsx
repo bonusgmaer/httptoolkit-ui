@@ -1,7 +1,7 @@
 import * as _ from 'lodash';
 import * as React from 'react';
 import { computed } from 'mobx';
-import { observer, inject, disposeOnUnmount } from 'mobx-react';
+import { observer, inject } from 'mobx-react';
 import {
     Router,
     RouteComponentProps,
@@ -11,7 +11,6 @@ import {
 
 import { styled } from '../styles';
 import { WithInjected } from '../types';
-import { trackPage } from '../metrics';
 import { appHistory } from '../routing';
 import { useHotkeys, Ctrl } from '../util/ui';
 
@@ -46,8 +45,8 @@ const AppContainer = styled.div<{ inert?: boolean }>`
     }
 `;
 
-interface ExtendProps extends React.PropsWithChildren<any> {
-	pageComponent: React.ComponentType<{}>;
+interface ExtendProps extends React.ComponentProps<any> {
+    pageComponent: React.ComponentType<any>;
 }
 
 const Route = ({ children, ...props }: ExtendProps & RouteComponentProps): React.ReactElement => {
@@ -98,12 +97,10 @@ class App extends React.Component<{
 
     @computed
     get canVisitSend() {
-        return this.props.accountStore.featureFlags.includes('send') && (
-            // Hide Send option if the server is too old for proper support.
-            // We show by default to avoid flicker in the most common case
-            serverVersion.state !== 'fulfilled' ||
-            versionSatisfies(serverVersion.value as string, SERVER_SEND_API_SUPPORTED)
-        );
+        // Hide Send option if the server is too old for proper support.
+        // We show by default to avoid flicker in the most common case
+        return serverVersion.state !== 'fulfilled' ||
+            versionSatisfies(serverVersion.value, SERVER_SEND_API_SUPPORTED);
     }
 
     @computed
@@ -131,7 +128,7 @@ class App extends React.Component<{
                     // Hide Mock option if the server is too old for proper support.
                     // We show by default to avoid flicker in the most common case
                     serverVersion.state !== 'fulfilled' ||
-                    versionSatisfies(serverVersion.value as string, MOCK_SERVER_RANGE)
+                    versionSatisfies(serverVersion.value, MOCK_SERVER_RANGE)
                 )
                 ? [{
                     name: 'Mock',
@@ -185,12 +182,6 @@ class App extends React.Component<{
                 url: 'https://github.com/httptoolkit/httptoolkit/issues/new/choose'
             }
         ] as SidebarItem[];
-    }
-
-    componentDidMount() {
-        disposeOnUnmount(this, appHistory.listen(
-            ({ location }) => trackPage(location)
-        ));
     }
 
     render() {

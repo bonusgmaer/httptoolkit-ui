@@ -19,11 +19,14 @@ import { useHotkeys, isEditable, windowSize } from '../../util/ui';
 import { debounceComputed } from '../../util/observable';
 import { UnreachableCheck } from '../../util/error';
 
+import { SERVER_SEND_API_SUPPORTED, serverVersion, versionSatisfies } from '../../services/service-versions';
+
 import { UiStore } from '../../model/ui/ui-store';
 import { ProxyStore } from '../../model/proxy-store';
 import { EventsStore } from '../../model/events/events-store';
 import { RulesStore } from '../../model/rules/rules-store';
 import { AccountStore } from '../../model/account/account-store';
+import { SendStore } from '../../model/send/send-store';
 import { HttpExchange } from '../../model/http/exchange';
 import { FilterSet } from '../../model/filters/search-filters';
 import { buildRuleFromExchange } from '../../model/rules/rule-creation';
@@ -49,18 +52,24 @@ interface ViewPageProps {
     uiStore: UiStore;
     accountStore: AccountStore;
     rulesStore: RulesStore;
+    sendStore: SendStore;
     navigate: (path: string) => void;
     eventId?: string;
 }
 
 const ViewPageKeyboardShortcuts = (props: {
+    isPaidUser: boolean,
     selectedEvent: CollectedEvent | undefined,
     moveSelection: (distance: number) => void,
     onPin: (event: HttpExchange) => void,
+    onResend: (event: HttpExchange) => void,
+    onMockRequest: (event: HttpExchange) => void,
     onDelete: (event: CollectedEvent) => void,
     onClear: () => void,
     onStartSearch: () => void
 }) => {
+    const selectedEvent = props.selectedEvent;
+
     useHotkeys('j', (event) => {
         if (isEditable(event.target)) return;
         props.moveSelection(1);
@@ -72,19 +81,33 @@ const ViewPageKeyboardShortcuts = (props: {
     }, [props.moveSelection]);
 
     useHotkeys('Ctrl+p, Cmd+p', (event) => {
-        if (props.selectedEvent?.isHttp()) {
-            props.onPin(props.selectedEvent);
+        if (selectedEvent?.isHttp()) {
+            props.onPin(selectedEvent);
             event.preventDefault();
         }
-    }, [props.selectedEvent, props.onPin]);
+    }, [selectedEvent, props.onPin]);
+
+    useHotkeys('Ctrl+r, Cmd+r', (event) => {
+        if (props.isPaidUser && selectedEvent?.isHttp() && !selectedEvent?.isWebSocket()) {
+            props.onResend(selectedEvent);
+            event.preventDefault();
+        }
+    }, [selectedEvent, props.onResend, props.isPaidUser]);
+
+    useHotkeys('Ctrl+m, Cmd+m', (event) => {
+        if (props.isPaidUser && selectedEvent?.isHttp() && !selectedEvent?.isWebSocket()) {
+            props.onMockRequest(selectedEvent);
+            event.preventDefault();
+        }
+    }, [selectedEvent, props.onMockRequest, props.isPaidUser]);
 
     useHotkeys('Ctrl+Delete, Cmd+Delete', (event) => {
         if (isEditable(event.target)) return;
 
-        if (props.selectedEvent) {
-            props.onDelete(props.selectedEvent);
+        if (selectedEvent) {
+            props.onDelete(selectedEvent);
         }
-    }, [props.selectedEvent, props.onDelete]);
+    }, [selectedEvent, props.onDelete]);
 
     useHotkeys('Ctrl+Shift+Delete, Cmd+Shift+Delete', (event) => {
         props.onClear();
@@ -111,6 +134,7 @@ type EditorKey = typeof EDITOR_KEYS[number];
 @inject('uiStore')
 @inject('accountStore')
 @inject('rulesStore')
+@inject('sendStore')
 @observer
 class ViewPage extends React.Component<ViewPageProps> {
 
@@ -178,7 +202,8 @@ class ViewPage extends React.Component<ViewPageProps> {
         this.props.uiStore,
         this.onPin,
         this.onDelete,
-        this.onBuildRuleFromExchange
+        this.onBuildRuleFromExchange,
+        this.onPrepareToResendRequest
     );
 
     componentDidMount() {
@@ -228,7 +253,7 @@ class ViewPage extends React.Component<ViewPageProps> {
                 ) ||
                 (
                     expandedViewCard === 'webSocketMessages' &&
-                    !selectedEvent.isWebSocket()
+                    !(selectedEvent.isWebSocket() && selectedEvent.wasAccepted())
                 )
             ) {
                 runInAction(() => {
@@ -258,9 +283,14 @@ class ViewPage extends React.Component<ViewPageProps> {
         );
     }
 
+    isSendAvailable() {
+        return versionSatisfies(serverVersion.value as string, SERVER_SEND_API_SUPPORTED);
+    }
+
     render(): JSX.Element {
         const { isPaused, events } = this.props.eventsStore;
         const { certPath } = this.props.proxyStore;
+        const { isPaidUser } = this.props.accountStore;
 
         const { filteredEvents, filteredEventCount } = this.filteredEventState;
 
@@ -285,6 +315,11 @@ class ViewPage extends React.Component<ViewPageProps> {
                 onDelete={this.onDelete}
                 onScrollToEvent={this.onScrollToCenterEvent}
                 onBuildRuleFromExchange={this.onBuildRuleFromExchange}
+                onPrepareToResendRequest={this.isSendAvailable()
+                    // Only show Send if flag is enabled & server is up to date
+                    ? this.onPrepareToResendRequest
+                    : undefined
+                }
             />;
         } else if (this.selectedEvent.isTlsFailure()) {
             rightPane = <TlsFailureDetailsPane
@@ -323,9 +358,12 @@ class ViewPage extends React.Component<ViewPageProps> {
 
         return <div className={this.props.className}>
             <ViewPageKeyboardShortcuts
+                isPaidUser={isPaidUser}
                 selectedEvent={this.selectedEvent}
                 moveSelection={this.moveSelection}
                 onPin={this.onPin}
+                onResend={this.onPrepareToResendRequest}
+                onMockRequest={this.onBuildRuleFromExchange}
                 onDelete={this.onDelete}
                 onClear={this.onForceClear}
                 onStartSearch={this.onStartSearch}
@@ -425,9 +463,21 @@ class ViewPage extends React.Component<ViewPageProps> {
     onBuildRuleFromExchange(exchange: HttpExchange) {
         const { rulesStore, navigate } = this.props;
 
+        if (!this.props.accountStore!.isPaidUser) return;
+
         const rule = buildRuleFromExchange(exchange);
         rulesStore!.draftRules.items.unshift(rule);
         navigate(`/mock/${rule.id}`);
+    }
+
+    @action.bound
+    async onPrepareToResendRequest(exchange: HttpExchange) {
+        const { sendStore, navigate } = this.props;
+
+        if (!this.props.accountStore!.isPaidUser) return;
+
+        await sendStore.addRequestInputFromExchange(exchange);
+        navigate(`/send`);
     }
 
     @action.bound
@@ -521,7 +571,13 @@ const LeftPane = styled.div`
 const StyledViewPage = styled(
     // Exclude stores etc from the external props, as they're injected
     ViewPage as unknown as WithInjected<typeof ViewPage,
-        'uiStore' | 'proxyStore' | 'eventsStore' | 'rulesStore' | 'accountStore' | 'navigate'
+        | 'eventsStore'
+        | 'proxyStore'
+        | 'uiStore'
+        | 'accountStore'
+        | 'rulesStore'
+        | 'sendStore'
+        | 'navigate'
     >
 )`
     height: 100vh;

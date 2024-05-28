@@ -1,6 +1,10 @@
 import * as _ from 'lodash';
 import { Headers, RawHeaders } from '../types';
 
+export {
+    h2HeadersToH1
+} from 'mockttp/dist/util/header-utils';
+
 // Based RFC7230, 3.2.6:
 export const HEADER_NAME_PATTERN = '^[!#$%&\'*+\\-.^_`\\|~A-Za-z0-9]+$';
     // The \\| is required here because in 'v' flag regexes (used in HTML patterns by default) the |
@@ -85,7 +89,12 @@ export const getHeaderValues = (headers: Headers | RawHeaders, headerKey: string
  * if multiple values are present others may remain. In general you probably don't want to use this
  * for headers that could legally have multiple values present.
  */
-export const setHeaderValue = (headers: Headers | RawHeaders, headerKey: string, headerValue: string) => {
+export const setHeaderValue = (
+    headers: Headers | RawHeaders,
+    headerKey: string,
+    headerValue: string,
+    options: { prepend?: true } = {}
+) => {
     const lowercaseHeaderKey = headerKey.toLowerCase();
 
     if (Array.isArray(headers)) {
@@ -93,11 +102,31 @@ export const setHeaderValue = (headers: Headers | RawHeaders, headerKey: string,
         if (headerPair) {
             headerPair[1] = headerValue;
         } else {
-            headers.push([headerKey, headerValue]);
+            if (options.prepend) headers.unshift([headerKey, headerValue]);
+            else headers.push([headerKey, headerValue]);
         }
     } else {
         const existingKey = Object.keys(headers).find(k => k.toLowerCase() === lowercaseHeaderKey);
         headers[existingKey || headerKey] = headerValue;
+    }
+}
+
+/**
+ * Clear the value of a given header, or do nothing if not present.
+ *
+ * For header objects, this clears all values. For raw headers, this clears the last value, so if
+ * multiple values are present others may remain. In general you probably don't want to use this
+ * for headers that could legally have multiple values present.
+ */
+export const removeHeader = (headers: Headers | RawHeaders, headerKey: string) => {
+    const lowercaseHeaderKey = headerKey.toLowerCase();
+
+    if (Array.isArray(headers)) {
+        const headerIndex = _.findLastIndex(headers, ([key]) => key.toLowerCase() === lowercaseHeaderKey);
+        if (headerIndex !== -1) headers.splice(headerIndex, 1);
+    } else {
+        const existingKey = Object.keys(headers).find(k => k.toLowerCase() === lowercaseHeaderKey);
+        delete headers[existingKey || headerKey];
     }
 }
 

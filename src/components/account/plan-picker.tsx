@@ -24,7 +24,7 @@ const PlanPickerModal = styled.dialog`
     right: auto;
 
     transform: translate(-50%, -50%);
-    z-index: 99;
+    z-index: 9999;
 
     display: flex;
     flex-direction: row;
@@ -92,7 +92,7 @@ const PlanCycle = styled.span<{selected: boolean}>`
     ${p => p.selected && css`
         background-color: ${p => p.theme.mainBackground};
         border-bottom: 3px solid ${p => p.theme.containerBorder};
-        box-shadow: 0 4px 10px 0 rgba(0,0,0,0.1);
+        box-shadow: 0 4px 10px 0 rgba(0,0,0,${p => p.theme.boxShadowAlpha/2});
     `}
 
     ${p => !p.selected && css`
@@ -142,7 +142,7 @@ const PricingTable = styled.div`
 const PricingTier = styled.section<{ highlighted?: boolean }>`
     display: flex;
     flex-direction: column;
-    box-shadow: 0 4px 10px 0 rgba(0,0,0,0.1);
+    box-shadow: 0 4px 10px 0 rgba(0,0,0,${p => p.theme.boxShadowAlpha/2});
     border-radius: 4px;
     border: 1px solid ${p => p.theme.containerBorder};
 
@@ -405,14 +405,15 @@ export class PlanPicker extends React.Component<PlanPickerProps> {
                     </TierPriceBlock>
                     <TierFeatures>
                         <Feature>
-                            <strong>Automated HTTP mocking & rewriting</strong>, including traffic redirection, mock responses, and errors & timeouts.
+                            <strong>Automated HTTP mocking & rewriting rules</strong>, including traffic redirection,
+                            mock responses, and errors & timeouts.
                         </Feature>
                         <Feature>
-                            <strong>Reusable mock rules</strong>. Persistent by default, plus
-                            import/export so you can store, reuse & share them later.
+                            <strong>Reusable Mock & Send tools</strong>. Persistent by default, plus
+                            import/export so you can store, reuse & share your rules & requests.
                         </Feature>
                         <Feature>
-                            <strong>Import/export for collected traffic</strong>, as either <a
+                            <strong>Import/export for all traffic</strong> as <a
                                 href="https://en.wikipedia.org/wiki/HAR_(file_format)"
                                 target="_blank"
                                 rel="noopener noreferrer"
@@ -421,7 +422,8 @@ export class PlanPicker extends React.Component<PlanPickerProps> {
                             </a> or ready-to-use code for 20+ tools.
                         </Feature>
                         <Feature>
-                            <strong>Advanced HTTP debugging & inspection tools</strong>, including compression & caching performance analysis.
+                            <strong>Advanced HTTP debugging tools</strong> including compression
+                            & caching analysis, and 'resend' functionality.
                         </Feature>
                         <Feature>
                             <strong>Validation &amp; API documentation for 2600+ built-in APIs</strong>,
@@ -436,7 +438,7 @@ export class PlanPicker extends React.Component<PlanPickerProps> {
                             whitelisted & client certificates, ports, and upstream proxies.
                         </Feature>
                         <Feature>
-                            <strong>Support ongoing development!</strong>
+                            <strong>Support open-source development!</strong>
                         </Feature>
                     </TierFeatures>
                     <PricingCTA>

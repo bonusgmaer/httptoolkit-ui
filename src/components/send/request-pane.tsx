@@ -1,63 +1,50 @@
 import * as _ from 'lodash';
 import * as React from 'react';
-import { action, computed } from 'mobx';
-import { inject, observer } from 'mobx-react';
+import { action, flow, observable, reaction } from 'mobx';
+import { disposeOnUnmount, inject, observer } from 'mobx-react';
 import * as portals from 'react-reverse-portal';
-import { Method } from 'mockttp';
 
 import { RawHeaders } from '../../types';
-import { css, styled } from '../../styles';
-import { Icon } from '../../icons';
 
 import { RulesStore } from '../../model/rules/rules-store';
 import { UiStore } from '../../model/ui/ui-store';
 import { RequestInput } from '../../model/send/send-request-model';
+import { EditableContentType } from '../../model/events/content-types';
 
-import { Button, Select, TextInput } from '../common/inputs';
 import { ContainerSizedEditor } from '../editor/base-editor';
+import { useHotkeys } from '../../util/ui';
+
+import { SendCardContainer } from './send-card-section';
+import { SendRequestLine } from './send-request-line';
 import { SendRequestHeadersCard } from './send-request-headers-card';
 import { SendRequestBodyCard } from './send-request-body-card';
 
-const RequestPaneContainer = styled.section<{
-    hasExpandedChild: boolean
-}>`
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-
-    ${p => p.hasExpandedChild && css`
-        > * {
-            /* CollapsibleCard applies its own display property to override this for the expanded card */
-            display: none;
-        }
-    `}
-`;
-
-// Layout here is tricky. Current setup seems to work (flex hrink everywhere, grow bodies,
-// card basis: auto, and min-height: 0, with editor 50% + min-height, and then
+// Layout here is tricky. Current setup seems to work (flex grow & shrink everywhere,
+// card basis: auto and min-height: 0, with editor 50% + min-height, and then
 // overflow-y: auto and basis: auto on the card contents too).
 //
 // It's worth reiterating the UI goals here explicitly for reference
 // - When multiple areas are open & full+, the area is split even-ish with scrolling
 //   in any areas required
-// - When areas are closed, body areas expand to the space, otherwise it collapses upwards
+// - When areas are closed, remaining areas expand to the space, even if unused
 // - When multiple areas are open, if there is spare space (e.g. few headers), the
 //   other areas that need it (body editor) expand and use the space.
 
-type MethodName = keyof typeof Method;
-const validMethods = Object.values(Method)
-    .filter(
-        value => typeof value === 'string'
-    ) as Array<MethodName>;
+const METHODS_WITHOUT_BODY = [
+    'GET',
+    'HEAD',
+    'OPTIONS'
+];
 
-const MethodSelect = styled(Select)`
-    font-size: ${p => p.theme.textSize};
-    display: inline-block;
-    width: auto;
-`;
+const RequestPaneKeyboardShortcuts = (props: {
+    sendRequest: () => void
+}) => {
+    useHotkeys('Ctrl+Enter, Cmd+Enter', (event) => {
+        props.sendRequest()
+    }, [props.sendRequest]);
 
-const UrlInput = styled(TextInput)`
-`;
+    return null;
+};
 
 @inject('rulesStore')
 @inject('uiStore')
@@ -69,37 +56,55 @@ export class RequestPane extends React.Component<{
     editorNode: portals.HtmlPortalNode<typeof ContainerSizedEditor>,
 
     requestInput: RequestInput,
-    sendRequest: (requestInput: RequestInput) => void
+    sendRequest: () => void,
+    isSending: boolean
 }> {
 
     get cardProps() {
         return this.props.uiStore!.sendCardProps;
     }
 
-    render() {
-        const { requestInput, editorNode, uiStore } = this.props;
+    componentDidMount() {
+        // Auto-collapse the body if you pick a body-less HTTP method
+        disposeOnUnmount(this, reaction(() => this.props.requestInput.method, (method) => {
+            // If there's a body entered, don't mess with it
+            if (this.props.requestInput.rawBody.decoded.length > 0) return;
 
-        return <RequestPaneContainer hasExpandedChild={!!uiStore?.expandedSendRequestCard}>
-            <MethodSelect value={requestInput.method} onChange={this.updateMethod}>
-                { validMethods.map((methodOption) =>
-                    <option
-                        key={methodOption}
-                        value={methodOption}
-                    >
-                        { methodOption }
-                    </option>
-                ) }
-            </MethodSelect>
-            <UrlInput
-                placeholder='https://example.com/hello?name=world'
-                value={requestInput.url}
-                onChange={this.updateUrl}
+            // If the body is empty, match the open/closed status to the method:
+            if (METHODS_WITHOUT_BODY.includes(method)) {
+                if (this.cardProps.requestBody.collapsed) return;
+                else this.cardProps.requestBody.onCollapseToggled();
+            } else {
+                if (!this.cardProps.requestBody.collapsed) return;
+                this.cardProps.requestBody.onCollapseToggled();
+            }
+        }, { fireImmediately: true }));
+    }
+
+    render() {
+        const {
+            requestInput,
+            sendRequest,
+            isSending,
+            editorNode,
+            uiStore
+        } = this.props;
+
+        return <SendCardContainer
+            hasExpandedChild={!!uiStore?.expandedSendRequestCard}
+        >
+            <RequestPaneKeyboardShortcuts
+                sendRequest={sendRequest}
             />
-            <Button
-                onClick={this.sendRequest}
-            >
-                Send <Icon icon={['far', 'paper-plane']} />
-            </Button>
+
+            <SendRequestLine
+                method={requestInput.method}
+                updateMethod={this.updateMethod}
+                url={requestInput.url}
+                updateUrl={this.updateUrl}
+                isSending={isSending}
+                sendRequest={sendRequest}
+            />
             <SendRequestHeadersCard
                 {...this.cardProps.requestHeaders}
                 headers={requestInput.headers}
@@ -107,23 +112,24 @@ export class RequestPane extends React.Component<{
             />
             <SendRequestBodyCard
                 {...this.cardProps.requestBody}
+                headers={requestInput.headers}
+                contentType={requestInput.requestContentType}
+                onContentTypeUpdated={this.updateRequestContentType}
                 body={requestInput.rawBody}
                 onBodyUpdated={this.updateBody}
                 editorNode={editorNode}
             />
-        </RequestPaneContainer>;
+        </SendCardContainer>;
     }
 
     @action.bound
-    updateMethod(event: React.ChangeEvent<HTMLSelectElement>) {
-        const { requestInput } = this.props;
-        requestInput.method = event.target.value;
+    updateMethod(method: string) {
+        this.props.requestInput.method = method;
     }
 
     @action.bound
-    updateUrl(changeEvent: React.ChangeEvent<HTMLInputElement>) {
-        const { requestInput } = this.props;
-        requestInput.url = changeEvent.target.value;
+    updateUrl(url: string) {
+        this.props.requestInput.url = url;
     }
 
     @action.bound
@@ -133,14 +139,15 @@ export class RequestPane extends React.Component<{
     }
 
     @action.bound
-    updateBody(input: Buffer) {
+    updateRequestContentType(contentType: EditableContentType) {
         const { requestInput } = this.props;
-        requestInput.rawBody = input;
+        requestInput.requestContentType = contentType;
     }
 
     @action.bound
-    async sendRequest() {
-        this.props.sendRequest(this.props.requestInput);
+    updateBody(input: Buffer) {
+        const { requestInput } = this.props;
+        requestInput.rawBody.updateDecodedBody(input);
     }
 
 }
