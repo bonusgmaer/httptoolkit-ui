@@ -129,7 +129,9 @@ export class AccountStore {
         this.user = yield getLatestUserData();
         this.user.subscription = {
             status: 'active',
-            plan: 'pro-annual',
+            sku: 'pro-annual',
+            tierCode: 'pro',
+            interval: 'annual',
             quantity: 1,
             expiry: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
             updateBillingDetailsUrl: '#',
