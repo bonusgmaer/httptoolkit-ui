@@ -130,6 +130,7 @@ export class AccountStore {
         this.user.subscription = {
             status: 'active',
             sku: 'pro-annual',
+            plan: 'pro-annual',
             tierCode: 'pro',
             interval: 'annual',
             quantity: 1,
