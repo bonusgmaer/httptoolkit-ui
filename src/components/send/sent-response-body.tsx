@@ -14,14 +14,17 @@ import { ViewableContentType, getCompatibleTypes } from '../../model/events/cont
 import { ExpandableCardProps } from '../common/card';
 
 import {
-    ContainerSizedEditorCardContent,
     ReadonlyBodyCardHeader,
     getBodyDownloadFilename,
     BodyCodingErrorBanner
 } from '../editor/body-card-components';
 import { ContentViewer } from '../editor/content-viewer';
 
-import { SendBodyCardSection, SentLoadingBodyCard } from './send-card-section';
+import {
+    SendBodyCardSection,
+    SentLoadingBodyCard,
+    SendEditorCardContent
+} from './send-card-section';
 import { ContainerSizedEditor } from '../editor/base-editor';
 
 // A selection of content types you might want to try out, to explore your encoded data:
@@ -78,7 +81,8 @@ export class SentResponseBodyCard extends React.Component<ExpandableCardProps & 
             ? getCompatibleTypes(
                 message.contentType,
                 lastHeader(message.headers['content-type']),
-                message.body
+                message.body,
+                message.headers,
             )
             : ['text'] as const;
 
@@ -114,18 +118,18 @@ export class SentResponseBodyCard extends React.Component<ExpandableCardProps & 
                         isPaidUser={isPaidUser}
                     />
                 </header>
-                <ContainerSizedEditorCardContent>
+                <SendEditorCardContent showFullBorder={false}>
                     <ContentViewer
                         contentId={message.id}
                         editorNode={this.props.editorNode}
-                        rawContentType={lastHeader(message.headers['content-type'])}
+                        headers={message.headers}
                         contentType={decodedContentType}
                         expanded={!!expanded}
                         cache={message.cache}
                     >
                         {decodedBody}
                     </ContentViewer>
-                </ContainerSizedEditorCardContent>
+                </SendEditorCardContent>
             </SendBodyCardSection>;
         } else if (!decodedBody && message?.body.decodingError) {
             // We have failed to decode the body content! Show the error & raw encoded data instead:
@@ -168,7 +172,7 @@ export class SentResponseBodyCard extends React.Component<ExpandableCardProps & 
                     headers={message.rawHeaders}
                 />
                 { encodedBody &&
-                    <ContainerSizedEditorCardContent>
+                    <SendEditorCardContent showFullBorder={false}>
                         <ContentViewer
                             contentId={message.id}
                             editorNode={this.props.editorNode}
@@ -178,7 +182,7 @@ export class SentResponseBodyCard extends React.Component<ExpandableCardProps & 
                         >
                             { encodedBody }
                         </ContentViewer>
-                    </ContainerSizedEditorCardContent>
+                    </SendEditorCardContent>
                 }
             </SendBodyCardSection>;
         } else {
