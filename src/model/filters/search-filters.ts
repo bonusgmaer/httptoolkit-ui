@@ -518,7 +518,7 @@ class HttpVersionFilter extends Filter {
     static filterSyntax = [
         new FixedStringSyntax("httpVersion"),
         new FixedStringSyntax("="), // Separate, so initial suggestions are names only
-        new StringOptionsSyntax(["1", "2"])
+        new StringOptionsSyntax(["1", "2", "3"])
     ] as const;
 
     static filterName = "httpVersion";
@@ -543,7 +543,7 @@ class HttpVersionFilter extends Filter {
 
     matches(event: CollectedEvent): boolean {
         return event.isHttp() &&
-            event.httpVersion === this.expectedVersion;
+            Math.round(event.httpVersion) === this.expectedVersion;
     }
 
     toString() {
@@ -994,7 +994,7 @@ class HeaderFilter extends Filter {
             new StringSyntax("header value", {
                 allowedChars: [[0, 255]], // Any ASCII! Wrapper guards against spaces for us.
                 suggestionGenerator: (value, index, events: CollectedEvent[]) => {
-                    // Find the start of the wrapped header name text that preceeds this
+                    // Find the start of the wrapped header name text that precedes this
                     const headerNameIndex = value.slice(0, index - 1).lastIndexOf('[');
 
                     const headerNamePart = HeaderFilter.filterSyntax[1];

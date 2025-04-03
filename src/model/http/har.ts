@@ -19,7 +19,7 @@ import {
 } from '../../types';
 
 import { stringToBuffer } from '../../util/buffer';
-import { lastHeader } from '../../util/headers';
+import { getHeaderValues, getHeaderValue } from '../../util/headers';
 import { ObservablePromise } from '../../util/observable';
 import { unreachableCheck } from '../../util/error';
 
@@ -27,6 +27,7 @@ import { UI_VERSION } from '../../services/service-versions';
 import { getStatusMessage } from './http-docs';
 import { StreamMessage } from '../events/stream-message';
 import { QueuedEvent } from '../events/events-store';
+import { parseCookieHeader, parseSetCookieHeader } from './cookies';
 
 // We only include request/response bodies that are under 500KB
 const HAR_BODY_SIZE_LIMIT = 500000;
@@ -99,7 +100,7 @@ export type HarTlsErrorEntry = {
 }
 
 export async function generateHar(
-    events: CollectedEvent[],
+    events: ReadonlyArray<CollectedEvent>,
     options: HarGenerationOptions = { bodySizeLimit: HAR_BODY_SIZE_LIMIT }
 ): Promise<Har> {
     const [exchanges, otherEvents] = _.partition(events, e => e.isHttp()) as [
@@ -143,6 +144,36 @@ function asHtkHeaders(headers: HarFormat.Header[]) {
         .value() as Headers;
 }
 
+function asHarRequestCookies(headers: Headers) {
+    const combinedHeader = getHeaderValues(headers, 'cookie').join('; ');
+    try {
+        return parseCookieHeader(combinedHeader);
+    } catch (e) {
+        console.warn('Could not parse request cookies for HAR', combinedHeader);
+        return [];
+    }
+}
+
+function asHarResponseCookies(headers: Headers) {
+    const setCookieHeaders = getHeaderValues(headers, 'set-cookie');
+    try {
+        // HAR has specific opinions about which fields to include and their casing
+        return parseSetCookieHeader(setCookieHeaders).map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            path: cookie.path,
+            domain: cookie.domain,
+            expires: cookie.expires,
+            httpOnly: cookie.httponly,
+            secure: cookie.secure,
+            sameSite: cookie.samesite
+        }));
+    } catch (e) {
+        console.warn('Could not parse response cookies for HAR', setCookieHeaders);
+        return [];
+    }
+}
+
 export function generateHarRequest(
     request: HtkRequest,
     waitForDecoding: false,
@@ -171,7 +202,7 @@ export function generateHarRequest(
         method: request.method,
         url: request.parsedUrl.toString(),
         httpVersion: `HTTP/${request.httpVersion || '1.1'}`,
-        cookies: [],
+        cookies: asHarRequestCookies(request.headers),
         headers: asHarHeaders(request.headers),
         ...(request.trailers ? {
             _trailers: asHarHeaders(request.trailers)
@@ -196,7 +227,7 @@ export function generateHarRequest(
             try {
                 requestEntry.postData = generateHarPostBody(
                     UTF8Decoder.decode(request.body.decoded),
-                    lastHeader(request.headers['content-type']) || 'application/octet-stream'
+                    getHeaderValue(request.headers, 'content-type') || 'application/octet-stream'
                 );
             } catch (e) {
                 if (e instanceof TypeError) {
@@ -327,11 +358,11 @@ async function generateHarResponse(
         status: response.statusCode,
         statusText: response.statusMessage,
         httpVersion: `HTTP/${request.httpVersion || '1.1'}`,
-        cookies: [],
+        cookies: asHarResponseCookies(response.headers),
         headers: asHarHeaders(response.headers),
         content: Object.assign(
             {
-                mimeType: lastHeader(response.headers['content-type']) ||
+                mimeType: getHeaderValue(response.headers, 'content-type') ||
                     'application/octet-stream',
                 size: response.body.decoded?.byteLength || 0
             },
@@ -496,7 +527,13 @@ export async function parseHar(harContents: unknown): Promise<ParsedHar> {
     const events: QueuedEvent[] = [];
     const pinnedIds: string[] = []
 
-    har.log.entries.forEach((entry, i) => {
+    har.log.entries
+    .sort((a, b) => {
+        const aStartTime = dateFns.parse(a.startedDateTime).getTime();
+        const bStartTime = dateFns.parse(b.startedDateTime).getTime();
+        return aStartTime - bStartTime;
+    })
+    .forEach((entry, i) => {
         const id = baseId + i;
         const isWebSocket = entry._resourceType === 'websocket';
 
@@ -708,7 +745,7 @@ function parseHarRequest(
         timingEvents,
         tags: [],
         matchedRuleId: false,
-        httpVersion: parseHttpVersion(request.httpVersion, request.headers),
+        httpVersion: parseHarHttpVersion(request.httpVersion, request.headers),
         protocol: request.url.split(':')[0],
         method: request.method,
         url: request.url,
@@ -729,7 +766,7 @@ function parseHarRequest(
     }
 }
 
-function parseHttpVersion(
+function parseHarHttpVersion(
     versionString: string | undefined,
     headers: HarFormat.Header[]
 ) {
@@ -741,6 +778,8 @@ function parseHttpVersion(
             return '1.1';
         }
     }
+
+    if (versionString === 'h3') return '3.0';
 
     const regexMatch = /^(HTTP\/)?([\d\.]+)$/i.exec(versionString);
     if (regexMatch) {

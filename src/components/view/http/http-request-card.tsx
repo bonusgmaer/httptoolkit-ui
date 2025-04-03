@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { inject, observer } from 'mobx-react';
 
-import { HttpExchange, HtkRequest } from '../../../types';
+import { HttpExchange, HtkRequest, HttpVersion } from '../../../types';
 import { styled } from '../../../styles';
 import { PhosphorIcon } from '../../../icons';
 
@@ -90,7 +90,7 @@ const MatchedRulePill = styled(inject('uiStore')((p: {
 
 const RawRequestDetails = (p: {
     request: HtkRequest,
-    httpVersion: 1 | 2
+    httpVersion: HttpVersion
 }) => {
     const methodDocs = getMethodDocs(p.request.method);
     const methodDetails = [
@@ -104,7 +104,7 @@ const RawRequestDetails = (p: {
     ].filter(d => !!d);
 
     return <div>
-        <CollapsibleSection>
+        <CollapsibleSection contentName={`${p.request.method} method documentation`}>
             <CollapsibleSectionSummary>
                 <ContentLabel>Method:</ContentLabel> { p.request.method }
             </CollapsibleSectionSummary>
@@ -120,7 +120,10 @@ const RawRequestDetails = (p: {
 
         <ContentLabelBlock>URL</ContentLabelBlock>
 
-        <CollapsibleSection prefixTrigger={true}>
+        <CollapsibleSection
+            contentName='URL components'
+            prefixTrigger={true}
+        >
             <CollapsibleSectionSummary>
                 <ContentMonoValueInline>{
                     p.request.parsedUrl.parseable

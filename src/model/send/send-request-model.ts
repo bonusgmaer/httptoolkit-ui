@@ -39,7 +39,7 @@ export class RequestInput {
             url: string,
             headers: RawHeaders,
             requestContentType: EditableContentType,
-            rawBody: Buffer
+            rawBody: Buffer | EditableBody
         }
     ) {
         // When deserializing, we need to ensure the body is provided directly
@@ -49,8 +49,13 @@ export class RequestInput {
             this.url = existingData.url;
             this.headers = existingData.headers;
             this.requestContentType = existingData.requestContentType;
+
+            const rawBody = existingData.rawBody instanceof EditableBody
+                ? existingData.rawBody.decoded
+                : existingData.rawBody;
+
             this.rawBody = new EditableBody(
-                existingData.rawBody,
+                rawBody,
                 undefined,
                 () => this.headers
             );
@@ -114,7 +119,7 @@ export async function buildRequestInputFromExchange(exchange: HttpExchange): Pro
         Buffer.from('!!! ORIGINAL REQUEST BODY COULD NOT BE DECODED !!!');
 
     // For now, all sent requests are HTTP/1, so we need to make sure we convert:
-    const headers = exchange.httpVersion === 2
+    const headers = exchange.httpVersion >= 2
         ? h2HeadersToH1(exchange.request.rawHeaders)
         : exchange.request.rawHeaders;
 

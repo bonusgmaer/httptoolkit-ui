@@ -10,7 +10,7 @@ import { styled } from '../../styles';
 import { ObservablePromise, isObservablePromise } from '../../util/observable';
 import { asError, unreachableCheck } from '../../util/error';
 import { stringToBuffer } from '../../util/buffer';
-import { lastHeader } from '../../util/headers';
+import { getHeaderValue } from '../../util/headers';
 
 import { ViewableContentType } from '../../model/events/content-types';
 import { Formatters, isEditorFormatter } from '../../model/events/body-formatting';
@@ -143,7 +143,7 @@ export class ContentViewer extends React.Component<ContentViewerProps> {
         const cachedValue = cache.get(cacheKey) as ObservablePromise<string> | string | undefined;
 
         const renderingContent = cachedValue ||
-            this.formatter.render(this.contentBuffer) as ObservablePromise<string> | string;
+            this.formatter.render(this.contentBuffer, this.props.headers) as ObservablePromise<string> | string;
         if (!cachedValue) cache.set(cacheKey, renderingContent);
 
         if (typeof renderingContent === 'string') {
@@ -201,7 +201,7 @@ export class ContentViewer extends React.Component<ContentViewerProps> {
             return <FormatterContainer expanded={this.props.expanded}>
                 <formatterConfig.Component
                     content={this.contentBuffer}
-                    rawContentType={lastHeader(this.props.headers?.['content-type'])}
+                    rawContentType={getHeaderValue(this.props.headers, 'content-type')}
                 />
             </FormatterContainer>;
         }

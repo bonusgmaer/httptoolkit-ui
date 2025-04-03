@@ -2,21 +2,21 @@ import * as _ from 'lodash';
 
 import { ExchangeMessage } from '../../types';
 import { Theme } from '../../styles';
-import { lastHeader } from '../../util/headers';
+import { getHeaderValue } from '../../util/headers';
 
 import { getBaseContentType } from './content-types';
 
 import { HTKEventBase } from './event-base';
-import { HttpExchange, SuccessfulExchange } from '../http/exchange';
+import { ViewableHttpExchange, SuccessfulExchange } from '../http/exchange';
 
 export const getMessageBaseAcceptTypes = (message: ExchangeMessage) =>
-    (lastHeader(message.headers['accept'])?.split(',') || [])
+    (getHeaderValue(message.headers, 'accept')?.split(',') || [])
         .map((acceptType) => getBaseContentType(acceptType));
 
 export const getMessageBaseContentType = (message: ExchangeMessage) =>
-    getBaseContentType(lastHeader(message.headers['content-type']));
+    getBaseContentType(getHeaderValue(message.headers, 'content-type'));
 
-const isMutatativeExchange = (exchange: HttpExchange) => _.includes([
+const isMutatativeExchange = (exchange: ViewableHttpExchange) => _.includes([
     'POST',
     'PATCH',
     'PUT',
@@ -182,7 +182,9 @@ const highlights = {
     pink: '#dd3a96'
 };
 
-export function getSummaryColor(exchangeOrCategory: HttpExchange | EventCategory): string {
+export function getSummaryColor(
+    exchangeOrCategory: ViewableHttpExchange | EventCategory
+): string {
     const category = typeof exchangeOrCategory === 'string' ?
         exchangeOrCategory : exchangeOrCategory.category;
 
