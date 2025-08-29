@@ -28,7 +28,10 @@ import {
     InputRTCMediaStats,
     InputRTCMediaTrackClosed,
     InputRTCExternalPeerAttached,
-    InputRuleEvent
+    InputRuleEvent,
+    InputRawPassthrough,
+    InputRawPassthroughData,
+    InputRequest
 } from '../../types';
 
 import { lazyObservablePromise } from '../../util/observable';
@@ -45,7 +48,8 @@ import { parseHar } from '../http/har';
 
 import { FailedTlsConnection } from '../tls/failed-tls-connection';
 import { TlsTunnel } from '../tls/tls-tunnel';
-import { HttpExchange } from '../http/exchange';
+import { RawTunnel } from '../raw-tunnel';
+import { HttpExchange } from '../http/http-exchange';
 import { WebSocketStream } from '../websockets/websocket-stream';
 import { RTCConnection } from '../webrtc/rtc-connection';
 import { RTCDataChannel } from '../webrtc/rtc-data-channel';
@@ -70,6 +74,9 @@ type EventTypesMap = {
     'tls-passthrough-opened': InputTlsPassthrough,
     'tls-passthrough-closed': InputTlsPassthrough,
     'client-error': InputClientError,
+    'raw-passthrough-opened': InputRawPassthrough,
+    'raw-passthrough-closed': InputRawPassthrough,
+    'raw-passthrough-data': InputRawPassthroughData,
     'rule-event': InputRuleEvent
 } & {
     // MockRTC:
@@ -90,6 +97,9 @@ const mockttpEventTypes = [
     'tls-passthrough-opened',
     'tls-passthrough-closed',
     'client-error',
+    'raw-passthrough-opened',
+    'raw-passthrough-closed',
+    'raw-passthrough-data',
     'rule-event'
 ] as const;
 
@@ -136,6 +146,8 @@ type OrphanableQueuedEvent<T extends
     | 'media-track-stats'
     | 'media-track-closed'
     | 'tls-passthrough-closed'
+    | 'raw-passthrough-closed'
+    | 'raw-passthrough-data'
 > = { type: T, event: EventTypesMap[T] };
 
 const LARGE_QUEUE_BATCH_SIZE = 1033; // Off by 33 for a new ticking UI effect
@@ -254,6 +266,13 @@ export class EventsStore {
                 case 'client-error':
                     return this.addClientError(queuedEvent.event);
 
+                case 'raw-passthrough-opened':
+                    return this.addRawTunnel(queuedEvent.event);
+                case 'raw-passthrough-closed':
+                    return this.markRawTunnelClosed(queuedEvent.event);
+                case 'raw-passthrough-data':
+                    return this.addRawTunnelChunk(queuedEvent.event);
+
                 case 'rule-event':
                     return this.addRuleEvent(queuedEvent.event);
 
@@ -314,7 +333,7 @@ export class EventsStore {
         const existingEvent = this.eventsList.getById(request.id);
         if (existingEvent) return;
 
-        const exchange = new HttpExchange(this.apiStore, request);
+        const exchange = new HttpExchange(request, this.apiStore);
         this.eventsList.push(exchange);
     }
 
@@ -344,7 +363,7 @@ export class EventsStore {
         if (existingEvent) {
             event = existingEvent as HttpExchange
         } else {
-            event = new HttpExchange(this.apiStore, { ...request });
+            event = new HttpExchange({ ...request }, this.apiStore);
             // ^ This mutates request to use it, so we have to shallow-clone to use it below too:
             this.eventsList.push(event);
         }
@@ -380,7 +399,7 @@ export class EventsStore {
 
     @action
     private addWebSocketRequest(request: InputCompletedRequest) {
-        const stream = new WebSocketStream(this.apiStore, { ...request });
+        const stream = new WebSocketStream({ ...request }, this.apiStore);
         // ^ This mutates request to use it, so we have to shallow-clone to use it below too
 
         stream.updateFromCompletedRequest(request, this.getMatchedRule(request));
@@ -453,9 +472,49 @@ export class EventsStore {
     }
 
     @action
+    private addRawTunnel(openEvent: InputRawPassthrough) {
+        const tunnel = new RawTunnel(openEvent);
+        this.eventsList.push(tunnel);
+    }
+
+    @action
+    private markRawTunnelClosed(closeEvent: InputRawPassthrough) {
+        const tunnel = this.eventsList.getRawTunnelById(closeEvent.id);
+
+        if (!tunnel) {
+            // Handle this later, once the tunnel open event has arrived
+            this.orphanedEvents[closeEvent.id] = {
+                type: 'raw-passthrough-closed', event: closeEvent
+            };
+            return;
+        }
+
+        tunnel.markClosed(closeEvent);
+    }
+
+    @action
+    private addRawTunnelChunk(dataEvent: InputRawPassthroughData) {
+        const tunnel = this.eventsList.getRawTunnelById(dataEvent.id);
+
+        if (!tunnel) {
+            // Handle this later, once the tunnel open event has arrived
+            this.orphanedEvents[dataEvent.id] = {
+                type: 'raw-passthrough-data', event: dataEvent
+            };
+            return;
+        }
+
+        tunnel.addChunk(dataEvent);
+    }
+
+    @action
     private addFailedTlsRequest(request: InputTlsFailure) {
         if (this.tlsFailures.some((failure) =>
-            failure.upstreamHostname === request.hostname &&
+            failure.upstreamHostname === (
+                request.tlsMetadata.sniHostname ??
+                request.destination?.hostname ??
+                request.hostname
+            ) &&
             failure.remoteIpAddress === request.remoteIpAddress
         )) return; // Drop duplicate TLS failures
 
@@ -476,17 +535,18 @@ export class EventsStore {
             return;
         }
 
-        const exchange = new HttpExchange(this.apiStore, {
+        const request = {
             ...error.request,
-            protocol: error.request.protocol || '',
+            matchedRuleId: false,
             method: error.request.method || '',
             url: error.request.url || `${error.request.protocol || 'http'}://`,
-            path: error.request.path || '/',
             headers: error.request.headers
-        });
+        } satisfies InputRequest;
+
+        const exchange = new HttpExchange(request, this.apiStore);
 
         if (error.response === 'aborted') {
-            exchange.markAborted(error.request);
+            exchange.markAborted(request);
         } else {
             exchange.setResponse(error.response);
         }
@@ -511,10 +571,20 @@ export class EventsStore {
             case 'passthrough-request-body':
                 exchange.updateFromUpstreamRequestBody(event.eventData);
                 break;
-            // Only request events handled for now
             case 'passthrough-response-head':
+                exchange.updateFromUpstreamResponseHead(event.eventData);
+                break;
             case 'passthrough-response-body':
+                exchange.updateFromUpstreamResponseBody(event.eventData);
+                break;
             case 'passthrough-abort':
+                exchange.updateFromUpstreamAbort(event.eventData);
+                break;
+
+            case 'passthrough-websocket-connect':
+                if (!exchange.isWebSocket()) throw new Error('Received WS connect event for non-WS');
+                const webSocket = exchange as WebSocketStream;
+                webSocket.updateWithUpstreamConnect(event.eventData);
                 break;
         }
     }
@@ -676,7 +746,7 @@ export class EventsStore {
 
     @action
     recordSentRequest(request: InputCompletedRequest): HttpExchange {
-        const exchange = new HttpExchange(this.apiStore, { ...request });
+        const exchange = new HttpExchange({ ...request }, this.apiStore);
         // ^ This mutates request to use it, so we have to shallow-clone to use it below too:
         exchange.updateFromCompletedRequest(request, false);
 

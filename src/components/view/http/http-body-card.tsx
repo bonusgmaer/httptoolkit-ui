@@ -7,7 +7,6 @@ import * as portals from 'react-reverse-portal';
 
 import { ExchangeMessage } from '../../../types';
 
-import { ErrorLike } from '../../../util/error';
 import { getHeaderValue } from '../../../util/headers';
 
 import { ViewableContentType, getCompatibleTypes } from '../../../model/events/content-types';
@@ -38,6 +37,8 @@ export class HttpBodyCard extends React.Component<ExpandableCardProps & {
     url: string,
     message: ExchangeMessage,
     apiBodySchema?: SchemaObject,
+
+    editorKey: string,
     editorNode: portals.HtmlPortalNode<typeof SelfSizedEditor>
 }> {
 
@@ -76,7 +77,9 @@ export class HttpBodyCard extends React.Component<ExpandableCardProps & {
             expanded,
             onCollapseToggled,
             onExpandToggled,
-            ariaLabel
+            ariaLabel,
+            editorKey,
+            editorNode
         } = this.props;
 
         const compatibleContentTypes = getCompatibleTypes(
@@ -89,9 +92,7 @@ export class HttpBodyCard extends React.Component<ExpandableCardProps & {
             ? this.selectedContentType!
             : message.contentType;
 
-        const decodedBody = message.body.decoded;
-
-        if (decodedBody) {
+        if (message.body.isDecoded()) {
             // We have successfully decoded the body content, show it:
             return <CollapsibleCard
                 ariaLabel={ariaLabel}
@@ -102,7 +103,7 @@ export class HttpBodyCard extends React.Component<ExpandableCardProps & {
             >
                 <header>
                     <ReadonlyBodyCardHeader
-                        body={decodedBody}
+                        body={message.body.decodedData}
                         mimeType={getHeaderValue(message.headers, 'content-type')}
                         downloadFilename={getBodyDownloadFilename(url, message.headers)}
 
@@ -120,24 +121,22 @@ export class HttpBodyCard extends React.Component<ExpandableCardProps & {
                 </header>
                 <EditorCardContent showFullBorder={!expanded}>
                     <ContentViewer
-                        contentId={`${message.id}-${direction}`}
-                        editorNode={this.props.editorNode}
+                        contentId={editorKey}
+                        editorNode={editorNode}
                         headers={message.headers}
                         contentType={decodedContentType}
                         schema={apiBodySchema}
                         expanded={!!expanded}
                         cache={message.cache}
                     >
-                        {decodedBody}
+                        { message.body.decodedData }
                     </ContentViewer>
                 </EditorCardContent>
             </CollapsibleCard>;
-        } else if (!decodedBody && message.body.decodingError) {
+        } else if (message.body.isFailed()) {
             // We have failed to decode the body content! Show the error & raw encoded data instead:
-            const error = message.body.decodingError as ErrorLike;
-            const encodedBody = Buffer.isBuffer(message.body.encoded)
-                ? message.body.encoded
-                : undefined;
+            const error = message.body.decodingError;
+            const encodedBody = message.body.encodedData;
 
             const encodedDataContentType = ENCODED_DATA_CONTENT_TYPES.includes(this.selectedContentType!)
                 ? this.selectedContentType!

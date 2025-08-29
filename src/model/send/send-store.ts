@@ -9,7 +9,7 @@ import {
     TimingEvents
 } from 'mockttp';
 
-import { RawTrailers } from '../../types';
+import { RawTrailers, HttpExchangeView } from '../../types';
 
 import { logError } from '../../errors';
 import { getObservableDeferred, lazyObservablePromise } from '../../util/observable';
@@ -24,7 +24,7 @@ import { RulesStore } from '../rules/rules-store';
 import { AccountStore } from '../account/account-store';
 import * as ServerApi from '../../services/server-api';
 
-import { HttpExchange } from '../http/exchange';
+import { HttpExchange } from '../http/http-exchange';
 import { ResponseHeadEvent, ResponseStreamEvent } from './send-response-model';
 import {
     buildRequestInputFromExchange,
@@ -84,7 +84,7 @@ export class SendStore {
         return requestInput;
     }
 
-    async addRequestInputFromExchange(exchange: HttpExchange) {
+    async addRequestInputFromExchange(exchange: HttpExchangeView) {
         trackEvent({ category: 'Send', action: 'Resend exchange' });
 
         this.addRequestInput(
@@ -159,6 +159,7 @@ export class SendStore {
             const hostWithPort = `${url.hostname}:${effectivePort}`;
             const clientCertificate = passthroughOptions.clientCertificateHostMap?.[hostWithPort] ||
                 passthroughOptions.clientCertificateHostMap?.[url.hostname!] ||
+                passthroughOptions.clientCertificateHostMap?.['*'] ||
                 undefined;
 
             const additionalCACerts = this.rulesStore.additionalCaCertificates.map((cert) =>
@@ -195,7 +196,6 @@ export class SendStore {
                 url: requestInput.url,
                 protocol: url.protocol.slice(0, -1),
                 path: url.pathname,
-                hostname: url.hostname,
                 headers: rawHeadersToHeaders(requestInput.headers),
                 rawHeaders: _.cloneDeep(requestInput.headers),
                 body: { buffer: encodedBody },

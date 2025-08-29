@@ -3,11 +3,12 @@ import { observable, computed } from 'mobx';
 import {
     FailedTlsConnection,
     TlsTunnel,
-    ViewableHttpExchange,
+    HttpExchangeView,
+    WebSocketView,
     RTCConnection,
     RTCDataChannel,
     RTCMediaTrack,
-    WebSocketStream
+    RawTunnel
 } from '../../types';
 
 import { getEventCategory } from './categorization';
@@ -17,11 +18,12 @@ export abstract class HTKEventBase {
     abstract get id(): string;
 
     // These can be overriden by subclasses to allow easy type narrowing:
-    isHttp(): this is ViewableHttpExchange { return false; }
-    isWebSocket(): this is WebSocketStream { return false; }
+    isHttp(): this is HttpExchangeView { return false; }
+    isWebSocket(): this is WebSocketView { return false; }
 
     isTlsFailure(): this is FailedTlsConnection { return false; }
     isTlsTunnel(): this is TlsTunnel { return false; }
+    isRawTunnel(): this is RawTunnel { return false; }
 
     isRTCConnection(): this is RTCConnection { return false; }
     isRTCDataChannel(): this is RTCDataChannel { return false; }
@@ -41,10 +43,5 @@ export abstract class HTKEventBase {
     private _pinned: boolean = false;
     public get pinned(): boolean { return this._pinned; }
     public set pinned(value: boolean) { this._pinned = value; }
-
-    // Logic elsewhere can put values into these caches to cache calculations
-    // about this event weakly, so they GC with the event.
-    // Keyed by symbols only, so we know we never have conflicts.
-    public cache = observable.map(new Map<symbol, unknown>(), { deep: false });
 
 }

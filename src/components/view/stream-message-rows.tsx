@@ -62,17 +62,19 @@ export const StreamMessageCollapsedRow = React.memo((p: {
                 p.message.content
                 // Limit the length - no point showing huge messages here. On a typical UI, we show about
                 // 100 chars here, so this should give us a good bit of buffer
-                .slice(0, 200)
+                .subarray(0, 200)
             )
         }
     </CollapsedStreamContent>
-    {
-        p.message.isBinary &&
-            <Pill color={warningColor}>Binary</Pill>
-    }
-    <Pill>
-        { getReadableSize(p.message.content.byteLength) }
-    </Pill>
+    <RowTags>
+        {
+            p.message.isBinary &&
+                <Pill color={warningColor}>Binary</Pill>
+        }
+        <Pill>
+            { getReadableSize(p.message.content.byteLength) }
+        </Pill>
+    </RowTags>
 </CollapsedStreamRowContainer>);
 
 const MessageArrow = styled(React.memo((p: {
@@ -139,6 +141,12 @@ const CollapsedStreamContent = styled(ContentMonoValue)`
     flex-grow: 1;
     width: auto;
     padding: 3px 0 4px;
+`;
+
+const RowTags = styled.div`
+    display: flex;
+    gap: 8px;
+    flex-direction: row;
 `;
 
 interface MessageEditorRowProps {

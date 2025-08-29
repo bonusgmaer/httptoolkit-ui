@@ -190,15 +190,25 @@ export class ProxyStore {
                     http2: this._http2CurrentlyEnabled,
                     https: {
                         tlsPassthrough: this._currentTlsPassthroughConfig
-                    } as MockttpHttpsOptions // Cert/Key options are set by the server
+                    } as MockttpHttpsOptions, // Cert/Key options are set by the server
+                    socks: true,
+                    passthrough: this.accountStore.featureFlags.includes('raw-tunnels')
+                        ? ['unknown-protocol']
+                        : undefined
                 },
-                port: this.portConfig
+                port: this.portConfig,
+                // We manage our own decoding client side - rules should not try to send
+                // use pre-decoded data (e.g. for breakpoints).
+                messageBodyDecoding: 'none'
             },
             webrtc: {}
         });
 
         this.mockttpRequestBuilder = new MockttpPluggableAdmin.MockttpAdminRequestBuilder(
-            this.adminClient.schema
+            this.adminClient.schema,
+            // We manage our own decoding client-side - we should not request decoded
+            // data in event subscriptions.
+            { messageBodyDecoding: 'none' }
         );
 
         announceServerReady();
@@ -290,7 +300,7 @@ export class ProxyStore {
         const { adminStream } = this.adminClient;
 
         return this.adminClient.sendQuery(
-            this.mockttpRequestBuilder.buildAddRequestRulesQuery(rules, true, adminStream)
+            this.mockttpRequestBuilder.buildAddRulesQuery('http', rules, true, adminStream)
         );
     }
 
@@ -298,7 +308,7 @@ export class ProxyStore {
         const { adminStream } = this.adminClient;
 
         return this.adminClient.sendQuery(
-            this.mockttpRequestBuilder.buildAddWebSocketRulesQuery(rules, true, adminStream)
+            this.mockttpRequestBuilder.buildAddRulesQuery('ws', rules, true, adminStream)
         );
     }
 

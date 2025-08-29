@@ -15,15 +15,17 @@ import {
     RTCStream,
     FailedTlsConnection,
     RTCConnection,
-    TlsTunnel
+    TlsTunnel,
+    RawTunnel
 } from '../../types';
+import { UiStore } from '../../model/ui/ui-store';
 
 import {
     getSummaryColor,
     EventCategory,
     describeEventCategory
 } from '../../model/events/categorization';
-import { nameHandlerClass } from '../../model/rules/rule-descriptions';
+import { nameStepClass } from '../../model/rules/rule-descriptions';
 import { getReadableSize } from '../../util/buffer';
 
 import { UnreachableCheck } from '../../util/error';
@@ -54,6 +56,7 @@ interface ViewEventListProps {
     isPaused: boolean;
 
     contextMenuBuilder: ViewEventContextMenuBuilder;
+    uiStore: UiStore;
 
     moveSelection: (distance: number) => void;
     onSelected: (event: CollectedEvent | undefined) => void;
@@ -348,7 +351,7 @@ const EventRow = observer((props: EventRowProps) => {
             tlsEvent={event}
         />;
     } else if (event.isHttp()) {
-        if (event.api?.isBuiltInApi && event.api.matchedOperation()) {
+        if (event.apiSpec?.isBuiltInApi && event.api?.matchedOperation()) {
             return <BuiltInApiRow
                 index={index}
                 isSelected={isSelected}
@@ -374,6 +377,13 @@ const EventRow = observer((props: EventRowProps) => {
         />;
     } else if (event.isRTCDataChannel() || event.isRTCMediaTrack()) {
         return <RTCStreamRow
+            index={index}
+            isSelected={isSelected}
+            style={style}
+            event={event}
+        />;
+    } else if (event.isRawTunnel()) {
+        return <RawTunnelRow
             index={index}
             isSelected={isSelected}
             style={style}
@@ -412,7 +422,7 @@ const ExchangeRow = inject('uiStore')(observer(({
             } request ${
                 response === 'aborted' || exchange.isWebSocket()
                     ? '' // Stated by the category already
-                : exchange.isBreakpointed
+                : exchange.downstream.isBreakpointed
                     ? 'waiting at a breakpoint'
                 : !response
                     ? 'waiting for a response'
@@ -439,7 +449,7 @@ const ExchangeRow = inject('uiStore')(observer(({
             {
                 response === 'aborted'
                     ? <StatusCode status={'aborted'} />
-                : exchange.isBreakpointed
+                : exchange.downstream.isBreakpointed
                     ? <WarningIcon title='Breakpointed, waiting to be resumed' />
                 : exchange.isWebSocket() && response?.statusCode === 101
                     ? <StatusCode // Special UI for accepted WebSockets
@@ -466,14 +476,14 @@ const ExchangeRow = inject('uiStore')(observer(({
             />
             {
                 exchange.matchedRule &&
-                exchange.matchedRule.handlerStepTypes.some(t =>
+                exchange.matchedRule.stepTypes.some(t =>
                     t !== 'passthrough' && t !== 'ws-passthrough' && t !== 'rtc-dynamic-proxy'
                 ) &&
                 <PhosphorIcon
                     icon='Pencil'
                     alt={`Handled by ${
-                        exchange.matchedRule.handlerStepTypes.length === 1
-                        ? nameHandlerClass(exchange.matchedRule.handlerStepTypes[0])
+                        exchange.matchedRule.stepTypes.length === 1
+                        ? nameStepClass(exchange.matchedRule.stepTypes[0])
                         : 'multi-step'
                     } rule`}
                     size='20px'
@@ -706,6 +716,35 @@ const BuiltInApiRow = observer((p: {
     </TrafficEventListRow>
 });
 
+const RawTunnelRow = observer((p: {
+    index: number,
+    event: RawTunnel,
+    isSelected: boolean,
+    style: {}
+}) => {
+    const { event } = p;
+
+    const connectionTarget = event.upstreamHostname
+        ? `${event.upstreamHostname}:${event.upstreamPort}`
+        : 'unknown destination';
+
+    return <TlsListRow
+        role="row"
+        aria-label={`Non-HTTP connection to ${connectionTarget}`}
+        aria-rowindex={p.index + 1}
+        data-event-id={event.id}
+        tabIndex={p.isSelected ? 0 : -1}
+
+        className={p.isSelected ? 'selected' : ''}
+        style={p.style}
+    >
+        {
+            event.isOpen() &&
+                <ConnectedSpinnerIcon />
+        } Non-HTTP connection to { connectionTarget }
+    </TlsListRow>
+});
+
 const TlsRow = observer((p: {
     index: number,
     tlsEvent: FailedTlsConnection | TlsTunnel,
@@ -767,6 +806,17 @@ export class ViewEventList extends React.Component<ViewEventListProps> {
     private listBodyRef = React.createRef<HTMLDivElement>();
     private listRef = React.createRef<List>();
 
+    private setListBodyRef = (element: HTMLDivElement | null) => {
+        // Update the ref
+        (this.listBodyRef as any).current = element;
+
+        // If the element is being mounted and we haven't restored state yet, do it now
+        if (element && !this.hasRestoredScrollState) {
+            this.restoreScrollPosition();
+            this.hasRestoredScrollState = true;
+        }
+    };
+
     private KeyBoundListWindow = observer(
         React.forwardRef<HTMLDivElement>(
             (props: any, ref) => <div
@@ -816,7 +866,7 @@ export class ViewEventList extends React.Component<ViewEventListProps> {
                 : <AutoSizer>{({ height, width }) =>
                     <Observer>{() =>
                         <List
-                            innerRef={this.listBodyRef}
+                            innerRef={this.setListBodyRef}
                             outerElementType={this.KeyBoundListWindow}
                             ref={this.listRef}
 
@@ -881,17 +931,28 @@ export class ViewEventList extends React.Component<ViewEventListProps> {
     }
 
     private wasListAtBottom = true;
+
     private updateScrolledState = () => {
         requestAnimationFrame(() => { // Measure async, once the scroll has actually happened
             this.wasListAtBottom = this.isListAtBottom();
+
+            // Only save scroll position after we've restored the initial state
+            if (this.hasRestoredScrollState) {
+                const listWindow = this.listBodyRef.current?.parentElement;
+
+                const scrollPosition = this.wasListAtBottom
+                    ? 'end'
+                    : (listWindow?.scrollTop ?? 'end');
+                if (listWindow) {
+                    this.props.uiStore.setViewScrollPosition(scrollPosition);
+                }
+            }
         });
     }
 
-    componentDidMount() {
-        this.updateScrolledState();
-    }
+    private hasRestoredScrollState = false;
 
-    componentDidUpdate() {
+    componentDidUpdate(prevProps: ViewEventListProps) {
         if (this.listBodyRef.current?.parentElement?.contains(document.activeElement)) {
             // If we previously had something here focused, and we've updated, update
             // the focus too, to make sure it's in the right place.
@@ -902,6 +963,25 @@ export class ViewEventList extends React.Component<ViewEventListProps> {
         // scroll there again ourselves now.
         if (this.wasListAtBottom && !this.isListAtBottom()) {
             this.listRef.current?.scrollToItem(this.props.events.length - 1);
+        } else if (prevProps.selectedEvent !== this.props.selectedEvent && this.props.selectedEvent) {
+            // If the selected event changed and we have a selected event, scroll to it
+            // This handles restoring the selected event when returning to the tab
+            this.scrollToEvent(this.props.selectedEvent);
+        }
+    }
+
+    private restoreScrollPosition = () => {
+        const savedPosition = this.props.uiStore.viewScrollPosition;
+        const listWindow = this.listBodyRef.current?.parentElement;
+        if (listWindow) {
+            if (savedPosition === 'end') {
+                listWindow.scrollTop = listWindow.scrollHeight;
+            } else {
+                // Only restore if we're not close to the current position (avoid unnecessary scrolling)
+                if (Math.abs(listWindow.scrollTop - savedPosition) > 10) {
+                    listWindow.scrollTop = savedPosition;
+                }
+            }
         }
     }
 

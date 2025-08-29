@@ -2,7 +2,7 @@ import * as Mockttp from 'mockttp';
 import * as serializr from 'serializr';
 import { observable } from 'mobx';
 
-import { HttpExchange, RawHeaders } from "../../types";
+import { HttpExchange, RawHeaders, HttpExchangeView } from "../../types";
 import { ObservablePromise } from '../../util/observable';
 import { h2HeadersToH1 } from '../../util/headers';
 
@@ -114,13 +114,13 @@ export const sendRequestSchema = serializr.createSimpleSchema({
     pendingSend: false // Never persisted at all
 });
 
-export async function buildRequestInputFromExchange(exchange: HttpExchange): Promise<RequestInput> {
-    const body = await exchange.request.body.decodedPromise ??
+export async function buildRequestInputFromExchange(exchange: HttpExchangeView): Promise<RequestInput> {
+    const body = await exchange.request.body.waitForDecoding() ??
         Buffer.from('!!! ORIGINAL REQUEST BODY COULD NOT BE DECODED !!!');
 
     // For now, all sent requests are HTTP/1, so we need to make sure we convert:
     const headers = exchange.httpVersion >= 2
-        ? h2HeadersToH1(exchange.request.rawHeaders)
+        ? h2HeadersToH1(exchange.request.rawHeaders, exchange.request.method)
         : exchange.request.rawHeaders;
 
     return new RequestInput({

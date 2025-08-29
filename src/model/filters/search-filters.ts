@@ -1,10 +1,10 @@
 import * as _ from 'lodash';
 
-import { CollectedEvent } from '../../types';
+import { HttpExchangeView, ViewableEvent } from '../../types';
 import { joinAnd } from '../../util/text';
 import { stringToBuffer } from '../../util/buffer';
 
-import { getStatusDocs } from '../http/http-docs';
+import { getStatusDocs, METHOD_NAMES } from '../http/http-docs';
 import { getReadableSize } from '../../util/buffer';
 import { EventCategories } from '../events/categorization';
 import { WebSocketStream } from '../websockets/websocket-stream';
@@ -32,7 +32,7 @@ import {
 
 export abstract class Filter {
 
-    abstract matches(event: CollectedEvent): boolean;
+    abstract matches(event: ViewableEvent): boolean;
     abstract toString(): string;
 
     constructor(
@@ -106,7 +106,7 @@ export class StringFilter extends Filter {
         super(filter);
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         if (this.filter === '') return true;
         const filter = this.filter.toLocaleLowerCase();
         return event.searchIndex.includes(filter);
@@ -246,7 +246,7 @@ class StatusFilter extends Filter {
             "<"
         ]),
         new FixedLengthNumberSyntax(3, {
-            suggestionGenerator: (_v, _i, events: CollectedEvent[]) =>
+            suggestionGenerator: (_v, _i, events: ViewableEvent[]) =>
                 _(events)
                 .map(e =>
                     'response' in e &&
@@ -298,7 +298,7 @@ class StatusFilter extends Filter {
         this.predicate = numberOperations[this.op];
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             event.isSuccessfulExchange() &&
             this.predicate(event.response.statusCode, this.status);
@@ -319,7 +319,7 @@ class CompletedFilter extends Filter {
         return "requests that have received a response";
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             event.isSuccessfulExchange();
     }
@@ -339,7 +339,7 @@ class PendingFilter extends Filter {
         return "requests that are still waiting for a response";
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             !event.isCompletedExchange();
     }
@@ -359,7 +359,7 @@ class AbortedFilter extends Filter {
         return "requests whose connection failed before receiving a response";
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             event.response === 'aborted'
     }
@@ -379,7 +379,7 @@ class ErrorFilter extends Filter {
         return "requests that weren't transmitted successfully";
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return !(event.isHttp()) || // TLS Error
             event.tags.some(tag =>
                 tag.startsWith('client-error') ||
@@ -402,7 +402,7 @@ class PinnedFilter extends Filter {
         return "exchanges that are pinned";
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.pinned;
     }
 
@@ -439,7 +439,7 @@ class CategoryFilter extends Filter {
         this.expectedCategory = categoryString;
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             event.category === this.expectedCategory
     }
@@ -459,11 +459,17 @@ class MethodFilter extends Filter {
         ]),
         new StringSyntax("method", {
             allowedChars: ALPHABETICAL,
-            suggestionGenerator: (_v, _i, events: CollectedEvent[]) =>
+            suggestionGenerator: (_v, _i, events: ViewableEvent[]) =>
                 _(events)
-                .map(e => e.isHttp() && e.request.method)
+                .filter(e =>
+                    e.isHttp() &&
+                    !!e.request.method &&
+                    METHOD_NAMES.includes(e.request.method.toUpperCase())
+                )
+                .map((e) =>
+                    (e as HttpExchangeView).request.method.toUpperCase()
+            )
                 .uniq()
-                .filter(Boolean)
                 .valueOf() as string[]
         })
     ] as const;
@@ -502,7 +508,7 @@ class MethodFilter extends Filter {
         this.expectedMethod = method.toUpperCase();
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             this.predicate(event.request.method.toUpperCase(), this.expectedMethod);
     }
@@ -541,7 +547,7 @@ class HttpVersionFilter extends Filter {
         this.expectedVersion = parseInt(versionString, 10);
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             Math.round(event.httpVersion) === this.expectedVersion;
     }
@@ -567,7 +573,7 @@ class WebSocketFilter extends Filter {
         super(filter);
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event instanceof WebSocketStream;
     }
 
@@ -609,7 +615,7 @@ class ProtocolFilter extends Filter {
         this.expectedProtocol = protocol.toLowerCase();
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         if (!(event.isHttp())) return false;
 
         // Parsed protocol is like 'http:', so we strip the colon
@@ -639,7 +645,7 @@ class HostnameFilter extends Filter {
                 charRange("-"),
                 charRange(".")
             ],
-            suggestionGenerator: (_v, _i, events: CollectedEvent[]) =>
+            suggestionGenerator: (_v, _i, events: ViewableEvent[]) =>
                 _(events)
                 .map(e => e.isHttp() && e.request.parsedUrl.hostname.toLowerCase())
                 .uniq()
@@ -674,7 +680,7 @@ class HostnameFilter extends Filter {
         this.expectedHostname = hostname.toLowerCase();
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             this.predicate(
                 event.request.parsedUrl.hostname.toLowerCase(),
@@ -731,7 +737,7 @@ class PortFilter extends Filter {
         this.predicate = numberOperations[this.op];
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         if (!(event.isHttp())) return false;
 
         const { protocol, port: explicitPort } = event.request.parsedUrl;
@@ -762,7 +768,7 @@ class PathFilter extends Filter {
             "$="
         ]),
         new StringSyntax("path", {
-            suggestionGenerator: (_v, _i, events: CollectedEvent[]) =>
+            suggestionGenerator: (_v, _i, events: ViewableEvent[]) =>
                 _(events)
                 .map(e => e.isHttp() && e.request.parsedUrl.pathname)
                 .uniq()
@@ -795,7 +801,7 @@ class PathFilter extends Filter {
         this.predicate = stringOperations[this.op];
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             this.predicate(event.request.parsedUrl.pathname, this.expectedPath);
     }
@@ -827,7 +833,7 @@ class QueryFilter extends Filter {
                 // You can pass an empty query only to = or !=
                 return op === "=" || op === "!=";
             },
-            suggestionGenerator: (_v, _i, events: CollectedEvent[]) =>
+            suggestionGenerator: (_v, _i, events: ViewableEvent[]) =>
                 _(events)
                 .map(e => e.isHttp() && e.request.parsedUrl.search)
                 .uniq()
@@ -877,7 +883,7 @@ class QueryFilter extends Filter {
         this.predicate = stringOperations[this.op];
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return event.isHttp() &&
             this.predicate(event.request.parsedUrl.search, this.expectedQuery);
     }
@@ -887,7 +893,7 @@ class QueryFilter extends Filter {
     }
 }
 
-const getAllHeaders = (e: CollectedEvent): [string, string | string[]][] => {
+const getAllHeaders = (e: ViewableEvent): [string, string | string[]][] => {
     if (!(e.isHttp())) return [];
     return [
         ...Object.entries(e.request.headers),
@@ -913,7 +919,7 @@ class HeadersFilter extends Filter {
             ['[', ']'],
             new StringSyntax("header value", {
                 allowedChars: [[0, 255]], // Any ASCII! Wrapper guards against spaces for us.
-                suggestionGenerator: (value, index, events: CollectedEvent[]) => {
+                suggestionGenerator: (value, index, events: ViewableEvent[]) => {
                     return _(events)
                         .map(e =>
                             _(getAllHeaders(e))
@@ -961,7 +967,7 @@ class HeadersFilter extends Filter {
         this.expectedHeaderValue = headerValue.toLowerCase();
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         if (!(event.isHttp())) return false;
 
         const headers = getAllHeaders(event);
@@ -993,7 +999,7 @@ class HeaderFilter extends Filter {
             ['[', ']'],
             new StringSyntax("header value", {
                 allowedChars: [[0, 255]], // Any ASCII! Wrapper guards against spaces for us.
-                suggestionGenerator: (value, index, events: CollectedEvent[]) => {
+                suggestionGenerator: (value, index, events: ViewableEvent[]) => {
                     // Find the start of the wrapped header name text that precedes this
                     const headerNameIndex = value.slice(0, index - 1).lastIndexOf('[');
 
@@ -1030,7 +1036,7 @@ class HeaderFilter extends Filter {
         new SyntaxWrapperSyntax(
             ['[', ']'],
             new StringSyntax("header name", {
-                suggestionGenerator: (_v, _i, events: CollectedEvent[]) =>
+                suggestionGenerator: (_v, _i, events: ViewableEvent[]) =>
                     _(events)
                     .map(e =>
                         getAllHeaders(e).map(([headerName]) =>
@@ -1088,7 +1094,7 @@ class HeaderFilter extends Filter {
         }
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         if (!(event.isHttp())) return false;
 
         const headers = getAllHeaders(event);
@@ -1153,15 +1159,15 @@ class BodySizeFilter extends Filter {
         this.predicate = numberOperations[this.op];
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         if (!(event.isHttp())) return false;
 
         const requestBody = event.request.body;
         const responseBody = event.isSuccessfulExchange()
             ? event.response.body
             : undefined;
-        const totalSize = requestBody.encoded.byteLength +
-            (responseBody?.encoded.byteLength || 0);
+        const totalSize = requestBody.encodedByteLength +
+            (responseBody?.encodedByteLength || 0);
 
         return event.isHttp() &&
             this.predicate(totalSize, this.expectedSize);
@@ -1219,14 +1225,14 @@ class BodyFilter extends Filter {
         this.predicate = bufferOperations[this.op];
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         if (!event.isHttp()) return false;
         if (!event.hasRequestBody() && !event.hasResponseBody()) return false; // No body, no match
 
-        // Accessing .decoded on both of these touches a lazy promise, starting decoding for all bodies:
-        const requestBody = event.request.body.decoded;
+        // Accessing .decodedData on both of these starts decoding for all bodies async:
+        const requestBody = event.request.body.decodedData;
         const responseBody = event.isSuccessfulExchange()
-            ? event.response.body.decoded
+            ? event.response.body.decodedData
             : undefined;
 
         const matchesRequestBody = !!requestBody && requestBody.byteLength > 0 &&
@@ -1276,7 +1282,7 @@ class ContainsFilter extends Filter {
         this.expectedContent = expectedContent.toLowerCase();
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         let content: Array<string | Buffer | number | undefined>;
 
         if (event.isHttp()) {
@@ -1286,8 +1292,8 @@ class ContainsFilter extends Filter {
                 ...Object.entries(
                     event.request.rawHeaders
                 ).map(([key, value]) => `${key}: ${value}`),
-                // Accessing .decoded touches a lazy promise, starting decoding:
-                event.request.body.decoded,
+                // Accessing .decodedData here starts decoding async:
+                event.request.body.decodedData,
 
                 ...(event.isSuccessfulExchange()
                     ? [
@@ -1296,8 +1302,8 @@ class ContainsFilter extends Filter {
                         ...Object.entries(
                             event.response.rawHeaders
                         ).map(([key, value]) => `${key}: ${value}`),
-                        // Accessing .decoded touches a lazy promise, starting decoding:
-                        event.response.body.decoded
+                        // Accessing .decodedData here starts decoding async:
+                        event.response.body.decodedData
                     ] : []
                 ),
 
@@ -1428,7 +1434,7 @@ class NotFilter extends Filter {
         this.innerFilter = new matchingFilterClass(innerValue) as Filter; // Never Filters - we don't support filter aliases here
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return !this.innerFilter.matches(event);
     }
 
@@ -1505,7 +1511,7 @@ class OrFilter extends Filter {
         });
     }
 
-    matches(event: CollectedEvent): boolean {
+    matches(event: ViewableEvent): boolean {
         return this.innerFilters.some(f => f.matches(event));
     }
 
